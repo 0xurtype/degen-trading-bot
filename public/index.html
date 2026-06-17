@@ -594,11 +594,6 @@ function showToast(msg){const t=$('toast');t.textContent=msg;t.classList.add('sh
 const copySVG='<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M3 10V3.5A1.5 1.5 0 0 1 4.5 2H11"/></svg>';
 
 // ═══ MOCK DATA ═══
-const SYMS=['DOGMOON','PEPE2','GROKAI','BONKINU','WIFCAT','ELONDG','SHIBX','MEMEAI','SOLCAT','FLOKI2','BABYDOGE','TURBO','GASS','NDX','FARTCOIN','MOONSHOT','DEGEN','CHAD','BRETT','POPCAT','MEW','CATNIP','WOWNERO','RAWR','KOKO','MOCHI','PNUT','GOAT','ACT','GRASS'];
-const NAMES=['DogMoon','Pepe 2.0','Grok AI','Bonk Inu','WIF Cat','Elon Doge','ShibX','Meme AI','SolCat','Floki 2','Baby Doge','Turbo Token','Gass Gas','NDX Finance','FartCoin','MoonShot','Degen Coin','Chad Token','Brett Coin','PopCat','MEW','CatNip','Wownero','Rawr Token','Koko Coin','Mochi','Peanut','GoatFinance','ActToken','Grass'];
-const DEXS=['pump.fun','raydium','meteora','orca','pump.fun','pump.fun','raydium','meteora','pump.fun','raydium'];
-const KOLNAMES=['CryptoWhale','DeFiKing','SmartApe','MoonGems','BitHunter','SnipePro','AlphaCall','GemFinder','OnChainZ','WhaleAlert','DeGenNinja','PumpLord','MoonRise','SolSeeker','TokenSniff','DeFiOwl'];
-const BIOS=['Top trader. Early calls on WIF, BONK.','DeFi researcher. On-chain analytics.','Alpha caller. 78% hit rate.','Gem hunter. Solana focused.','MEV & snipe specialist.','Data-driven calls only.','100K+ community leader.','Smart money tracker.','CT influencer.','Whale movement alerts.'];
 
 async function fetchTokens(){
   try{
@@ -620,49 +615,6 @@ async function fetchTokens(){
     }));
   }catch(e){console.error('fetchTokens:',e)}
 }
-function genTokens(){
-  tokens=[];
-  for(let i=0;i<30;i++){
-    const sym=SYMS[i%SYMS.length];const age=ri(30,86400);const nKols=ri(0,6);
-    const tkols=[];const usedK=new Set();
-    for(let k=0;k<nKols;k++){let ni;do{ni=ri(0,KOLNAMES.length-1)}while(usedK.has(ni));usedK.add(ni);const nm=KOLNAMES[ni];tkols.push({name:nm,init:nm[0],color:hsl(nm),followers:ri(5,500)+'K',sol:+rfl(0.5,12).toFixed(1),price:+rfl(0.000001,0.01).toFixed(8)})}
-    tokens.push({
-      ca:rstr(44),sym,name:NAMES[i%NAMES.length],color:hsl(sym),deployed:Date.now()-age*1000,
-      dex:DEXS[i%DEXS.length],price:+rfl(0.0000001,0.5).toFixed(8),pc5:+rfl(-45,80).toFixed(1),
-      liq:+rfl(500,500000).toFixed(0),mcap:+rfl(5000,5000000).toFixed(0),vol24h:+rfl(100,200000).toFixed(0),
-      holders:ri(10,5000),buys:ri(5,2000),sells:ri(2,800),
-      devDeploys:ri(0,15),devRugs:ri(0,3),devWallet:+rfl(0.1,25).toFixed(1),
-      smartW:ri(0,25),whales:ri(0,8),snipers:ri(0,12),
-      hp:Math.random()<0.08,lpL:Math.random()>0.25,mint:Math.random()<0.1,
-      oSrc:Math.random()>0.15,buyT:Math.random()<0.1?ri(1,10):0,sellT:Math.random()<0.1?ri(1,10):0,
-      top10:+rfl(0.05,0.6).toFixed(2),kols:tkols,
-      volChange:+rfl(-30,300).toFixed(0),holderGrowth:+rfl(-10,50).toFixed(0)
-    });
-  }
-}
-
-function genSmartWallets(){
-  const names=['7xK9m...3fPq','9oL2n...8kJw','4tR7b...1mNc','2aF5x...6dHs','8cV3k...9gTz','5nQ1p...4wXr','3jM8y...7bLk','6eS2f...0qDv','1hW4a...5iCe','9rG7t...2uBo'];
-  const tags=['whale','sniper','smart','whale','sniper','smart','whale','smart','sniper','smart'];
-  smartWallets=names.map((name,i)=>{
-    const tag=tags[i];const nBuys=ri(3,8);
-    const buys=[];const usedT=new Set();
-    for(let b=0;b<nBuys;b++){let ti;do{ti=ri(0,tokens.length-1)}while(usedT.has(ti)&&usedT.size<tokens.length);usedT.add(ti);const t=tokens[ti];buys.push({sym:t.sym,color:t.color,sol:+rfl(0.5,25).toFixed(1),pnl:+rfl(-40,200).toFixed(0),time:ri(1,7200),ca:t.ca})}
-    return{name,tag,tagColor:tag==='whale'?'var(--blue)':tag==='sniper'?'var(--orange)':'var(--green)',wins:ri(3,28),total:ri(10,50),totalSol:+rfl(10,500).toFixed(0),totalPnl:+rfl(-50,2000).toFixed(0),avgBuy:+rfl(0.5,10).toFixed(1),avgHold:ri(1,120)+'m',bestTrade:ri(20,500)+'%',buys:buys.sort((a,b)=>b.pnl-a.pnl)};
-  });
-}
-
-function genKols(){
-  kols=KOLNAMES.map((name,i)=>{
-    const handles=KOLNAMES.map(n=>'@'+n.toLowerCase());
-    const nCalls=ri(5,15);const calls=[];const usedT=new Set();
-    for(let c=0;c<nCalls;c++){let ti;do{ti=ri(0,tokens.length-1)}while(usedT.has(ti)&&usedT.size<tokens.length);usedT.add(ti);const t=tokens[ti];calls.push({sym:t.sym,color:t.color,pc:+rfl(-50,300).toFixed(0),sol:+rfl(0.2,15).toFixed(1),time:ri(1,86400),hit:Math.random()>.3,ca:t.ca})}
-    return{name,handle:handles[i],init:name[0],color:hsl(name),followers:ri(5,800)+'K',bio:BIOS[i%BIOS.length],
-      calls:calls.sort((a,b)=>b.pc-a.pc),hitRate:Math.round(calls.filter(c=>c.hit).length/calls.length*100),
-      totalCalls:ri(50,500),totalPnl:ri(10,200)+'SOL',avgReturn:+rfl(-10,120).toFixed(0),
-      online:Math.random()>.3,lastActive:ri(1,3600),pnl7d:+rfl(-20,300).toFixed(0),signalStrength:ri(30,100)};
-  });
-}
 
 const API='http://'+location.hostname+':8000';
 
@@ -671,9 +623,6 @@ async function loadLiveData(){
     await Promise.all([fetchTokens(),fetchKol()]);
   }catch(e){console.error('loadLiveData:',e)}
   // If tokens empty, generate mock
-  if(!tokens.length)genTokens();
-  if(!kols.length)genKols();
-  if(!smartWallets.length)genSmartWallets();
   renderScanner();
   renderRightPanel();
   if(currentView==='trending')renderTrending();
