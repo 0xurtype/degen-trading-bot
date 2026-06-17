@@ -1,157 +1,85 @@
-# GMGN-scanner
-Run with Docker
+# GMGN Signal Scanner
+
+Token scanner & wallet tracker for Solana memecoins. Single-file app with Docker deployment.
+
+## Features
+
+- **Token Scanner** — real-time feed with KOL buys, smart wallets, snipers, holder count
+- **Trending** — hot tokens ranked by volume, price action, holder growth
+- **Smart Money Tracker** — whale and sniper wallet activity with PnL
+- **KOL Activity** — influencer calls, hit rates, recent trades
+- **Wallet Tracker** — track any Solana wallet, view trades and PnL
+- **Signal Filters** — KOL buys, smart wallets, snipers, dev checks, safety filters
+
+## Quick Start
+
+### Docker (recommended)
 
 bash
 docker compose up -d --build
-# → http://localhost
-docker compose up -d --build
-# → http://localhost
+→ http://localhost
 
-Run with plain static hosting
+### Node (local dev)
 
-Just serve the public/ directory with any HTTP server:
+bash
+npm install
+npm start
+→ http://localhost:3000
 
+### Static hosting
+
+Serve `public/` with any HTTP server:
 
 bash
 npx serve public -l 3000
-# or
-python3 -m http.server 3000 --directory public
-npx serve public -l 3000
-# or
+or
 python3 -m http.server 3000 --directory public
 
-Deploy to VPS (Ubuntu + Docker)
+## Deploy to VPS
+
+### Docker
 
 bash
-# 1. Install Docker
-curl -fsSL https://get.docker.com | sh
-# 1. Install Docker
-curl -fsSL https://get.docker.com | sh
-2. Clone
-git clone && cd gmgn-scanner
-
-3. Run
+ssh user@your-vps-ip
+git clone https://github.com/0xurtype/GMGN-scanner.git
+cd GMGN-scanner
 docker compose up -d --build
 
-App is now live on port 80
-Point your domain's A record to the VPS IP
-text
-
-## Deploy to VPS (Ubuntu + Nginx, no Docker)
-
-```bash
-sudo apt install nginx -y
-sudo cp -r public/* /var/www/html/
-sudo systemctl restart nginx
-
-## Deploy to VPS (Ubuntu + Nginx, no Docker)
-
-```bash
-sudo apt install nginx -y
-sudo cp -r public/* /var/www/html/
-sudo systemctl restart nginx
-
-Project structure
-
-text
-public/index.html    ← Single-file app (HTML + CSS + JS)
-server.js            ← Lightweight Node dev server
-Dockerfile           ← Production container
-nginx.conf           ← Nginx config for container
-docker-compose.yml   ← One-command deploy
-public/index.html    ← Single-file app (HTML + CSS + JS)
-server.js            ← Lightweight Node dev server
-Dockerfile           ← Production container
-nginx.conf           ← Nginx config for container
-docker-compose.yml   ← One-command deploy
-
-Next steps to production
-
- Replace mock data with real API calls (Solana RPC, Birdeye, Jupiter, Helius)
- Add wallet authentication (Phantom wallet connect)
- Backend service for wallet tracking persistence (Node/Go + Postgres)
- WebSocket for real-time feed
- Rate limiting & caching layer
-Step 3: Push to GitHub
-bash
-# Create the folder
-mkdir gmgn-scanner && cd gmgn-scanner
-
-# Copy your HTML file into public/
-mkdir public
-# paste your index.html into public/index.html
-
-# (paste all the files above into their locations)
-
-# Init and push
-git init
-git add .
-git commit -m "initial: GMGN scanner prototype with wallet tracker"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/gmgn-scanner.git
-git push -u origin main
-# Create the folder
-mkdir gmgn-scanner && cd gmgn-scanner
-
-# Copy your HTML file into public/
-mkdir public
-# paste your index.html into public/index.html
-
-# (paste all the files above into their locations)
-
-# Init and push
-git init
-git add .
-git commit -m "initial: GMGN scanner prototype with wallet tracker"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/gmgn-scanner.git
-git push -u origin main
-Step 4: Deploy on your VPS
-Option A — Docker (recommended, takes 2 minutes):
-
-bash
-ssh your-user@your-vps-ip
-
-git clone https://github.com/YOUR_USERNAME/gmgn-scanner.git
-cd gmgn-scanner
-docker compose up -d --build
-
-# That's it. Visit http://your-vps-ip
-ssh your-user@your-vps-ip
-
-git clone https://github.com/YOUR_USERNAME/gmgn-scanner.git
-cd gmgn-scanner
-docker compose up -d --build
-
-# That's it. Visit http://your-vps-ip
-Option B — Bare Nginx (no Docker):
+### Bare Nginx
 
 bash
 sudo apt install nginx -y
-git clone https://github.com/YOUR_USERNAME/gmgn-scanner.git
-sudo cp -r gmgn-scanner/public/* /var/www/html/
+git clone https://github.com/0xurtype/GMGN-scanner.git
+sudo cp -r GMGN-scanner/public/* /var/www/html/
 sudo systemctl restart nginx
-sudo apt install nginx -y
-git clone https://github.com/YOUR_USERNAME/gmgn-scanner.git
-sudo cp -r gmgn-scanner/public/* /var/www/html/
-sudo systemctl restart nginx
-Option C — Local only:
 
-bash
-cd gmgn-scanner
-npm install
-npm start
-# → http://localhost:3000
-cd gmgn-scanner
-npm install
-npm start
-# → http://localhost:3000
-Production roadmap
-Once it's running, the path from prototype to real product:
+## Project Structure
 
-1.Real data — swap mock generators for Solana RPC calls + Helius/Birdeye/Jupiter APIs
-2.Wallet connect — Phantom/Solflare integration for auth
-3.Backend — Node.js or Go API + PostgreSQL for wallet persistence, trade history, alerts
-4.WebSocket — real-time token feed instead of manual scan button
-5.Auth & billing — if you want to monetize it
-The HTML file is the entire prototype — everything else is just deployment scaffolding. You can start iterating on public/index.html immediately.
+
+GMGN-scanner/
+├── public/
+│   └── index.html          Single-file app (HTML + CSS + JS)
+├── server.js               Lightweight Node dev server
+├── package.json
+├── Dockerfile              Nginx + Alpine container
+├── nginx.conf              Nginx config with security headers
+├── docker-compose.yaml     One-command deploy
+└── .gitignore
+
+## Roadmap
+
+- [ ] Replace mock data with real API calls (Helius, Birdeye, Jupiter)
+- [ ] Wallet authentication (Phantom / Solflare)
+- [ ] Backend service (Node/Go + PostgreSQL) for wallet persistence
+- [ ] WebSocket real-time feed
+- [ ] Rate limiting & caching layer
+- [ ] Auth & billing
+
+## License
+
+MIT
+
+
+Clean, no duplicated sections, proper code fences. Replace your current README with this.
+
+Also delete gmgnscanner-structure.txt — it's redundant now.
