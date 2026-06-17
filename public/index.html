@@ -424,7 +424,7 @@ tr.row td.r{text-align:right}
   <div class="center">
     <!-- SCANNER -->
     <div class="panel-view active" id="view-scanner">
-      <div class="tbl-head"><div><span class="th-cnt" id="rCnt">—</span></div><div class="th-r"><div class="live-badge"><div class="dot"></div>DEMO DATA</div></div></div>
+      <div class="tbl-head"><div><span class="th-cnt" id="rCnt">—</span></div><div class="th-r"><div class="live-badge"><div class="dot"></div>LIVE</div></div></div>
       <div class="tbl-scroll">
         <table class="tt"><thead><tr>
           <th style="width:30px">#</th><th>Token / Contract</th><th>Age</th><th>Dev</th><th>KOLs</th>
@@ -574,6 +574,26 @@ const DEXS=['pump.fun','raydium','meteora','orca','pump.fun','pump.fun','raydium
 const KOLNAMES=['CryptoWhale','DeFiKing','SmartApe','MoonGems','BitHunter','SnipePro','AlphaCall','GemFinder','OnChainZ','WhaleAlert','DeGenNinja','PumpLord','MoonRise','SolSeeker','TokenSniff','DeFiOwl'];
 const BIOS=['Top trader. Early calls on WIF, BONK.','DeFi researcher. On-chain analytics.','Alpha caller. 78% hit rate.','Gem hunter. Solana focused.','MEV & snipe specialist.','Data-driven calls only.','100K+ community leader.','Smart money tracker.','CT influencer.','Whale movement alerts.'];
 
+async function fetchTokens(){
+  try{
+    const r=await fetch(API+'/api/tokens?limit=100&sort=score');
+    const d=await r.json();
+    tokens=d.tokens.map(t=>({
+      ca:t.address,sym:t.symbol,name:t.name,color:hsl(t.symbol),
+      deployed:(t.created_timestamp||0)*1000,
+      dex:t.source==='new_creation'?'Pump.fun':t.source,
+      price:t.price,pc5:0,liq:t.liquidity,mcap:t.market_cap,vol24h:t.volume_24h,
+      holders:t.holder_count,buys:0,sells:0,
+      devDeploys:t.dev_deploys,devRugs:Math.round(t.bundler_pct/20),devWallet:t.dev_wallet,
+      smartW:t.smart_degen_count,whales:0,snipers:t.sniper_count,
+      hp:t.honeypot,lpL:!t.honeypot&&t.renounced_freeze,mint:!t.renounced_mint,
+      oSrc:true,buyT:t.buy_tax,sellT:t.sell_tax,
+      top10:t.top10_rate/100,kols:[],
+      score:t.score,bundler_pct:t.bundler_pct,holder_count:t.holder_count,
+      source:t.source,address:t.address,volChange:0,holderGrowth:0
+    }));
+  }catch(e){console.error('fetchTokens:',e)}
+}
 function genTokens(){
   tokens=[];
   for(let i=0;i<30;i++){
@@ -618,8 +638,57 @@ function genKols(){
   });
 }
 
-function score(t){let s=50;s+=Math.min(t.kols.length*10,40);s+=Math.min(t.smartW*1.5,25);s+=Math.min(t.whales*3,15);s+=Math.min(t.snipers*1,8);s+=Math.min(t.holders/150,10);s+=t.lpL?6:-8;s+=t.oSrc?3:-5;if(t.hp)s-=40;s-=t.devRugs*10;s-=Math.max(0,t.devWallet-5)*2;s-=t.buyT*2;s-=t.sellT*1.5;if(t.devDeploys>=5&&t.devRugs===0)s+=8;s+=Math.min(t.buys/800,5);return Math.max(0,Math.min(100,Math.round(s)))}
-function devSt(t){return t.devRugs>2?'risky':t.devRugs>0?'warn':'clean'}
+const API='http://'+location.hostname+':8000';
+async function loadLiveData(){
+  await Promise.all([fetchTokens(),fetchKol()]);
+  renderScanner();renderRightPanel();
+  if(currentView==='trending')renderTrending();
+  if(currentView==='kols')renderKols();
+}
+function connectSSE(){
+  const es=new EventSource(API+'/api/stream');
+  es.addEventListener('new_token',e=>{
+    const t=JSON.parse(e.data);
+    if(tokens.find(x=>x.ca===t.address))return;
+    tokens.unshift({
+      ca:t.address,sym:t.symbol,name:t.name,color:hsl(t.symbol),
+      deployed:(t.created_timestamp||0)*1000,
+      dex:t.source==='new_creation'?'Pump.fun':t.source,
+      price:t.price,pc5:0,liq:t.liquidity,mcap:t.market_cap,vol24h:t.volume_24h,
+      holders:t.holder_count,buys:0,sells:0,
+      devDeploys:t.dev_deploys,devRugs:Math.round(t.bundler_pct/20),devWallet:t.dev_wallet,
+      smartW:t.smart_degen_count,whales:0,snipers:t.sniper_count,
+      hp:t.honeypot,lpL:!t.honeypot&&t.renounced_freeze,mint:!t.renounced_mint,
+      oSrc:true,buyT:t.buy_tax,sellT:t.sell_tax,
+      top10:t.top10_rate/100,kols:[],
+      score:t.score,bundler_pct:t.bundler_pct,holder_count:t.holder_count,
+      source:t.source,address:t.address,volChange:0,holderGrowth:0
+    });
+    if(currentView==='scanner')renderScanner();
+    renderRightPanel();
+  });
+  es.onerror=()=>{setTimeout(connectSSE,5000)};
+}
+async function fetchKol(){
+  try{
+    const r=await fetch(API+'/api/kol');
+    const d=await r.json();
+    const trades=d.trades||[];
+    const kolMap={};
+    trades.forEach(tr=>{
+      const info=tr.maker_info||{};
+      const name=info.twitter_username||tr.maker?.slice(0,8)||'Unknown';
+      const tags=info.tags||[];
+      if(!kolMap[name])kolMap[name]={name,handle:'@'+name.toLowerCase(),init:name[0],color:hsl(name),calls:[],followers:'—',bio:tags.join(', ')};
+      const addr=tr.base_address||'';
+      const sym=tr.base_token?.symbol||'?';
+      kolMap[name].calls.push({sym,color:hsl(sym),pc:0,sol:+(tr.amount_usd/180||0).toFixed(1),time:tr.timestamp||0,hit:tr.side==='buy',ca:addr});
+    });
+    kols=Object.values(kolMap).map(k=>{k.calls=k.calls.sort((a,b)=>b.time-a.time).slice(0,10);k.hitRate=Math.round(k.calls.filter(c=>c.hit).length/Math.max(1,k.calls.length)*100);k.totalCalls=k.calls.length;k.avgReturn=0;k.online=true;k.lastActive=k.calls[0]?.time||0;return k}).sort((a,b)=>b.totalCalls-a.totalCalls).slice(0,20);
+  }catch(e){console.error('fetchKol:',e)}
+}
+function score(t){return t.score||50}
+function devSt(t){return t.dev_status||'clean'}
 
 // ═══ VIEW SWITCH ═══
 function switchView(el){
@@ -875,13 +944,10 @@ function openTokenModal(idx){
 function closeM(){$('mbg').classList.remove('open')}
 
 // ═══ SCAN ═══
-function doScan(){
+async function doScan(){
   const btn=$('scanBtn');btn.disabled=true;btn.textContent='SCANNING...';
-  setTimeout(()=>{btn.textContent='Fetching pairs...'},300);
-  setTimeout(()=>{btn.textContent='Enriching data...'},800);
-  setTimeout(()=>{genTokens();genSmartWallets();genKols();btn.textContent='Rendering...';
-    setTimeout(()=>{renderScanner();renderRightPanel();if(currentView==='trending')renderTrending();if(currentView==='smartmoney')renderSmartMoney();if(currentView==='kols')renderKols();btn.disabled=false;btn.textContent='SCAN NOW'},200);
-  },1200);
+  await loadLiveData();
+  btn.disabled=false;btn.textContent='SCAN NOW';
 }
 
 function renderRightPanel(){
@@ -899,8 +965,7 @@ document.querySelectorAll('#dexP .pill').forEach(p=>p.onclick=function(){selD=th
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeM();closeConfirm()}});
 
 // ═══ INIT ═══
-loadWallets();
-genTokens();genSmartWallets();genKols();renderScanner();renderRightPanel();renderWalletList();
+loadWallets();loadLiveData();connectSSE();renderWalletList();
 </script>
 </body>
 </html>
