@@ -22,8 +22,7 @@ docker compose up -d --build
 ### Node (local dev)
 
 bash
-npm install
-npm start
+npm run dev
 → http://localhost:3000
 
 ### Static hosting
@@ -59,7 +58,6 @@ sudo systemctl restart nginx
 GMGN-scanner/
 ├── public/
 │   └── index.html          Single-file app (HTML + CSS + JS)
-├── server.js               Lightweight Node dev server
 ├── package.json
 ├── Dockerfile              Nginx + Alpine container
 ├── nginx.conf              Nginx config with security headers
