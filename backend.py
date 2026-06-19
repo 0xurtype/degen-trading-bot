@@ -524,6 +524,18 @@ async def smart_token_enrich(token_addr: str):
         if twitter:
             tk["twitter"] = twitter
 
+    # Wallet tags: smart wallets, KOLs, etc.
+    wts = info.get("wallet_tags_stat", {})
+    if isinstance(wts, dict):
+        tk["smart_wallet_count"] = to_int(wts.get("smart_wallets", 0))
+        tk["renowned_wallet_count"] = to_int(wts.get("renowned_wallets", 0))
+        tk["sniper_count"] = to_int(wts.get("sniper_wallets", 0))
+
+    # Top holder rate from stat
+    stat = info.get("stat", {})
+    if isinstance(stat, dict):
+        tk["top_10_holder_rate"] = round(to_float(stat.get("top_10_holder_rate", 0)) * 100, 1)
+
     mcap = to_float(info.get("market_cap"))
     if mcap == 0:
         supply = to_float(info.get("total_supply", 0))
@@ -595,6 +607,10 @@ def _enrich_dev(signal: dict):
     signal['liquidity'] = info.get('liquidity', 0) or smart_info.get('liquidity', 0)
     signal['holders'] = info.get('holder_count', 0) or smart_info.get('holder_count', 0)
     signal['twitter'] = info.get('twitter', '') or smart_info.get('twitter', '')
+    signal['smart_wallet_count'] = info.get('smart_degen_count', 0) or smart_info.get('smart_wallet_count', 0)
+    signal['renowned_wallet_count'] = info.get('renowned_count', 0) or smart_info.get('renowned_wallet_count', 0)
+    signal['sniper_count'] = info.get('sniper_count', 0) or smart_info.get('sniper_count', 0)
+    signal['top_10_holder_rate'] = info.get('top10_rate', 0) or smart_info.get('top_10_holder_rate', 0)
     return signal
 
 def detect_signals():
@@ -606,6 +622,11 @@ def detect_signals():
     for token_addr, token_data in smart_tokens_db.items():
         symbol = token_data.get('symbol', '?')
         name = token_data.get('name', '')
+
+        # Skip wrapped tokens (WSOL, WETH, etc.)
+        if symbol in ('SOL', 'WSOL', 'WETH', 'WBTC') or token_addr in ('So11111111111111111111111111111111111111112',):
+            continue
+
         wallets = list(token_data.get('wallets', {}).values())
         mcap = token_data.get('mcap', 0)
         volume = token_data.get('volume_24h', 0)
@@ -778,6 +799,20 @@ async def send_discord_alert(signals: list[dict]):
         if wallets:
             wallet_list = '\n'.join(f'• `{w}`' for w in wallets[:5])
             fields.append({'name': '🧠 Smart Wallets', 'value': wallet_list, 'inline': False})
+
+        # Token intelligence
+        smart_ct = s.get('smart_wallet_count', 0)
+        kol_ct = s.get('renowned_wallet_count', 0)
+        sniper_ct = s.get('sniper_count', 0)
+        top10 = s.get('top_10_holder_rate', 0)
+        intel_parts = []
+        if smart_ct: intel_parts.append(f'Smart: **{smart_ct}**')
+        if kol_ct: intel_parts.append(f'KOLs: **{kol_ct}**')
+        if sniper_ct: intel_parts.append(f'Snipers: **{sniper_ct}**')
+        if intel_parts:
+            fields.append({'name': '📊 Token Intel', 'value': ' • '.join(intel_parts), 'inline': True})
+        if top10:
+            fields.append({'name': '🏆 Top 10 Holders', 'value': f'**{top10}%**', 'inline': True})
 
         # Twitter if available
         twitter = s.get('twitter', '')
