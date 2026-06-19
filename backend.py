@@ -452,7 +452,7 @@ async def scan_smart_wallets():
     new_signals = detect_signals()
     if new_signals:
         try:
-            await send_tg_alert(new_signals)
+            await send_discord_alert(new_signals)
         except Exception as e:
             print(f'[tg-alert] ERROR in scan_smart_wallets: {e}')
             import traceback; traceback.print_exc()
@@ -493,6 +493,36 @@ async def smart_token_enrich(token_addr: str):
 
     tk["holder_count"] = to_int(info.get("holder_count", tk["holder_count"]))
     tk["liquidity"] = to_float(info.get("liquidity", tk["liquidity"]))
+
+    # Store dev data from token info (nested under 'dev' key)
+    dev = info.get("dev", {})
+    if isinstance(dev, dict):
+        creator = dev.get("creator_address", "")
+        if creator:
+            tk["creator"] = creator
+            open_count = to_int(dev.get("creator_open_count", 0))
+            status = dev.get("creator_token_status", "")
+            # Determine dev status from open_count and status
+            if open_count > 10:
+                tk["dev_status"] = "risky"
+            elif open_count > 3:
+                tk["dev_status"] = "warn"
+            else:
+                tk["dev_status"] = "clean"
+            tk["dev_deploys"] = open_count
+            tk["dev_wallet_pct"] = round(to_float(dev.get("creator_token_balance", 0)) * 100, 1) if dev.get("creator_token_balance") else 0
+
+    # Safety data from security endpoint
+    tk["renounced_mint"] = info.get("renounced_mint", False)
+    tk["renounced_freeze"] = info.get("renounced_freeze_account", False)
+    tk["honeypot"] = info.get("is_honeypot", "unknown") == "yes"
+
+    # Twitter from link
+    link = info.get("link", {})
+    if isinstance(link, dict):
+        twitter = link.get("twitter_username", "")
+        if twitter:
+            tk["twitter"] = twitter
 
     mcap = to_float(info.get("market_cap"))
     if mcap == 0:
@@ -546,6 +576,26 @@ ACCUMULATION_MIN_WALLETS = 2  # minimum smart wallets to trigger
 LARGE_BUY_THRESHOLD = 500  # USD
 CONCENTRATION_THRESHOLD = 0.10  # 10% of volume
 MAX_TOKEN_AGE = 172800  # 2 days in seconds
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL', '')
+
+def _enrich_dev(signal: dict):
+    """Add dev data from tokens_db or smart_tokens_db to signal dict."""
+    addr = signal['token_address']
+    info = tokens_db.get(addr, {})
+    # Also check smart_tokens_db for dev data from enrichment
+    smart_info = smart_tokens_db.get(addr, {})
+    # Prefer tokens_db, fallback to smart_tokens_db
+    signal['creator'] = info.get('creator', '') or smart_info.get('creator', '')
+    signal['dev_status'] = info.get('dev_status', '') or smart_info.get('dev_status', 'unknown')
+    signal['dev_deploys'] = info.get('dev_deploys', 0) or smart_info.get('dev_deploys', 0)
+    signal['dev_wallet_pct'] = info.get('dev_wallet', 0) or smart_info.get('dev_wallet_pct', 0)
+    signal['renounced_mint'] = info.get('renounced_mint', False) or smart_info.get('renounced_mint', False)
+    signal['renounced_freeze'] = info.get('renounced_freeze', False) or smart_info.get('renounced_freeze', False)
+    signal['honeypot'] = info.get('honeypot', False) or smart_info.get('honeypot', False)
+    signal['liquidity'] = info.get('liquidity', 0) or smart_info.get('liquidity', 0)
+    signal['holders'] = info.get('holder_count', 0) or smart_info.get('holder_count', 0)
+    signal['twitter'] = info.get('twitter', '') or smart_info.get('twitter', '')
+    return signal
 
 def detect_signals():
     """Scan recent trades for pre-hype patterns."""
@@ -593,7 +643,7 @@ def detect_signals():
                     'timestamp': now,
                     'confidence': min(95, 40 + len(buy_wallets) * 15 + (10 if mcap < 500000 else 0)),
                 }
-                new_signals.append(signal)
+                new_signals.append(_enrich_dev(signal))
                 detected_signal_keys.add(key)
 
         # --- SIGNAL 2: Large Buy ---
@@ -616,7 +666,7 @@ def detect_signals():
                         'timestamp': now,
                         'confidence': min(90, 50 + (20 if w.get('inflow', 0) >= 1000 else 0) + (10 if mcap < 300000 else 0)),
                     }
-                    new_signals.append(signal)
+                    new_signals.append(_enrich_dev(signal))
                     detected_signal_keys.add(key)
 
         # --- SIGNAL 3: Smart Money Concentration ---
@@ -639,7 +689,7 @@ def detect_signals():
                         'timestamp': now,
                         'confidence': min(85, 40 + round(concentration * 100) + (10 if mcap < 500000 else 0)),
                     }
-                    new_signals.append(signal)
+                    new_signals.append(_enrich_dev(signal))
                     detected_signal_keys.add(key)
 
     if new_signals:
@@ -650,61 +700,121 @@ def detect_signals():
     return new_signals
 
 
-async def send_tg_alert(signals: list[dict]):
-    """Send signal alerts via Telegram bot."""
-    import urllib.request
-    if not signals:
+async def send_discord_alert(signals: list[dict]):
+    """Send signal alerts via Discord webhook with rich embeds."""
+    import urllib.request, urllib.error
+    if not signals or not DISCORD_WEBHOOK_URL:
         return
 
-    token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
-    if not token:
-        return
+    color_map = {'accumulation': 0xFF6600, 'large_buy': 0x00CC44, 'concentration': 0x3366FF}
+    emoji_map = {'accumulation': '🔥', 'large_buy': '💰', 'concentration': '📊'}
+    dev_emoji = {'clean': '✅', 'warn': '⚠️', 'risky': '🚨', 'unknown': '❓'}
 
-    # Batch max 5 signals per message
-    for batch in [signals[i:i+5] for i in range(0, len(signals), 5)]:
-        lines = ['🚨 <b>PRE-HYPE SIGNAL</b>\n']
+    embeds = []
+    for s in signals:
+        sig_type = s.get('type', 'unknown')
+        emoji = emoji_map.get(sig_type, '⚡')
+        color = color_map.get(sig_type, 0x888888)
+        addr = s.get('token_address', '')
+        symbol = s.get('token', '???')
+        gmgn_url = f'https://gmgn.ai/sol/token/{addr}'
 
-        emoji_map = {'accumulation': '🔥', 'large_buy': '💰', 'concentration': '📊'}
+        # Title
+        title = f'{emoji} {sig_type.upper()} — ${symbol}'
 
-        for s in batch:
-            emoji = emoji_map.get(s['type'], '⚡')
-            type_label = s['type'].replace('_', ' ').upper()
-            addr_short = s['token_address'][:6] + '...' + s['token_address'][-4:]
+        # Description
+        desc_lines = []
+        if sig_type == 'accumulation':
+            desc_lines.append(f'**{s.get("details", "")}**')
+            desc_lines.append(f'Net Inflow: **${s.get("total_usd", 0):,.2f}**')
+            desc_lines.append(f'Wallets: **{s.get("wallet_count", 0)}**')
+        elif sig_type == 'large_buy':
+            desc_lines.append(f'**{s.get("wallet", "?")}** bought **${s.get("amount", 0):,.2f}**')
+            desc_lines.append(f'Age: **{s.get("age_hours", 0)}h**')
+        elif sig_type == 'concentration':
+            desc_lines.append(f'**{s.get("concentration_pct", 0)}%** of 24h volume from smart wallets')
+            desc_lines.append(f'Inflow: **${s.get("inflow_usd", 0):,.2f}** from **{s.get("wallet_count", 0)}** wallets')
+        description = '\n'.join(desc_lines)
 
-            if s['type'] == 'accumulation':
-                lines.append(f'{emoji} <b>{type_label}</b> — ${s["token"]}')
-                lines.append(f'{s["details"]}')
-                lines.append(f'Inflow: ${s["total_usd"]:,.0f} | MCap: ${s["mcap"]:,.0f}')
-                lines.append(f'Wallets: {", ".join(s["wallets"][:3])}')
-            elif s['type'] == 'large_buy':
-                lines.append(f'{emoji} <b>{type_label}</b> — ${s["token"]}')
-                lines.append(f'{s["wallet"]} bought ${s["amount"]:,.0f}')
-                lines.append(f'MCap: ${s["mcap"]:,.0f} | Age: {s["age_hours"]}h')
-            elif s['type'] == 'concentration':
-                lines.append(f'{emoji} <b>{type_label}</b> — ${s["token"]}')
-                lines.append(f'Smart inflow: {s["concentration_pct"]}% of 24h vol')
-                lines.append(f'${s["inflow_usd"]:,.0f} from {s["wallet_count"]} wallets')
+        fields = []
 
-            lines.append(f'Contract: <code>{addr_short}</code>')
-            lines.append('')
+        # Contract — always show full address
+        fields.append({'name': '📋 Contract', 'value': f'`{addr}`', 'inline': False})
 
-        text = '\n'.join(lines)
+        # Dev info
+        creator = s.get('creator', '')
+        if creator:
+            dev_st = s.get('dev_status', 'unknown')
+            dev_dep = s.get('dev_deploys', 0)
+            dev_pct = s.get('dev_wallet_pct', 0)
+            dev_label = f'{dev_emoji.get(dev_st, "❓")} {dev_st.upper()}'
+            dev_info = f'`{creator}`\n{dev_label} • {dev_dep} deploys • {dev_pct}% held'
+            fields.append({'name': '👤 Dev Wallet', 'value': dev_info, 'inline': False})
 
-        url = f'https://api.telegram.org/bot{token}/sendMessage'
-        payload = json.dumps({
-            'chat_id': TG_CHAT_ID,
-            'text': text,
-            'parse_mode': 'HTML',
-            'disable_web_page_preview': True,
-        })
+        # Safety flags
+        flags = []
+        if s.get('renounced_mint'): flags.append('🔒 Mint renounced')
+        if s.get('renounced_freeze'): flags.append('🔒 Freeze renounced')
+        if s.get('honeypot'): flags.append('⚠️ HONEYPOT')
+        if flags:
+            fields.append({'name': '🛡️ Safety', 'value': ' • '.join(flags), 'inline': False})
 
+        # Market data
+        mcap = s.get('mcap', 0)
+        vol = s.get('volume_24h', 0)
+        liq = s.get('liquidity', 0)
+        holders = s.get('holders', 0)
+        mcap_str = f'${mcap:,.0f}' if mcap > 0 else 'N/A'
+        vol_str = f'${vol:,.0f}' if vol > 0 else 'N/A'
+        liq_str = f'${liq:,.0f}' if liq > 0 else 'N/A'
+        fields.append({'name': '💰 MCap', 'value': mcap_str, 'inline': True})
+        fields.append({'name': '📈 Vol 24h', 'value': vol_str, 'inline': True})
+        fields.append({'name': '💧 Liquidity', 'value': liq_str, 'inline': True})
+        if holders > 0:
+            fields.append({'name': '👥 Holders', 'value': str(holders), 'inline': True})
+
+        # Wallet list
+        wallets = s.get('wallets', [])
+        if wallets:
+            wallet_list = '\n'.join(f'• `{w}`' for w in wallets[:5])
+            fields.append({'name': '🧠 Smart Wallets', 'value': wallet_list, 'inline': False})
+
+        # Twitter if available
+        twitter = s.get('twitter', '')
+        if twitter:
+            fields.append({'name': '🐦 Twitter', 'value': f'@{twitter}', 'inline': True})
+
+        confidence = s.get('confidence', 0)
+        conf_label = 'HIGH' if confidence >= 80 else 'MID' if confidence >= 60 else 'LOW'
+
+        embed = {
+            'title': title,
+            'description': description,
+            'url': gmgn_url,
+            'color': color,
+            'fields': fields,
+            'footer': {'text': f'Pre-Hype Engine • {conf_label} {confidence}% confidence'},
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        }
+        embeds.append(embed)
+
+    # Discord max 10 embeds per message
+    for batch in [embeds[i:i+10] for i in range(0, len(embeds), 10)]:
         try:
-            print(f'[tg-alert] Sending batch of {len(batch)} signals...')
-            req = urllib.request.Request(url, data=payload.encode(), headers={'Content-Type': 'application/json'})
-            urllib.request.urlopen(req, timeout=10)
-            print(f'[tg-alert] Sent {len(batch)} signals')
+            print(f'[discord-alert] Sending {len(batch)} embeds...')
+            payload = json.dumps({'embeds': batch}).encode()
+            req = urllib.request.Request(DISCORD_WEBHOOK_URL, data=payload, headers={
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0'
+            })
+            resp = urllib.request.urlopen(req, timeout=15)
+            status = resp.getcode()
+            print(f'[discord-alert] Sent {len(batch)} embeds (HTTP {status})')
+        except urllib.error.HTTPError as e:
+            body = e.read().decode() if hasattr(e, 'read') else ''
+            print(f'[discord-alert] HTTP {e.code}: {body[:200]}')
         except Exception as e:
-            print(f'[tg-alert] Error: {e}')
+            print(f'[discord-alert] Error: {e}')
 
 
 async def scan_trenches():
@@ -976,7 +1086,13 @@ def get_signals(
     result = signals_db
     if signal_type:
         result = [s for s in result if s.get('type') == signal_type]
-    return {'signals': result[:limit], 'total': len(signals_db)}
+    # Re-enrich from current smart_tokens_db (dev data may not have been available at detection time)
+    enriched = []
+    for s in result[:limit]:
+        if not s.get('creator'):
+            s = _enrich_dev(s)
+        enriched.append(s)
+    return {'signals': enriched, 'total': len(signals_db)}
 
 @app.get("/api/stream")
 async def stream_tokens():
