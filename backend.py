@@ -40,8 +40,12 @@ last_scan_time: float = 0
 scan_count: int = 0
 kol_cache: dict = {}  # cached KOL data
 wallets_db: dict[str, dict] = {}  # smart wallets keyed by address
+smart_tokens_db: dict[str, dict] = {}  # smart tokens keyed by base_address
 wallet_trades: list = []  # raw trades from last poll
 SMART_WALLET_INTERVAL = 60  # seconds between smart wallet polls
+SMART_TOKEN_ENRICH_INTERVAL = 30  # seconds between token enrich cycles
+SMART_TOKEN_ENRICH_BATCH = 5  # max tokens to enrich per cycle
+SMART_TOKEN_ENRICH_DELAY = 2  # seconds between enrichments
 
 
 def load_seen():
@@ -272,7 +276,7 @@ async def enrich_loop():
 # ── Background Scanner ──────────────────────────────────────────────────
 
 async def scan_smart_wallets():
-    """Poll GMGN smart money trades and aggregate per wallet."""
+    """Poll GMGN smart money trades and aggregate per wallet + per token."""
     global wallet_trades
     raw = gmgn_cli("track", "smartmoney", "--chain", "sol")
     if not raw:
@@ -284,7 +288,7 @@ async def scan_smart_wallets():
 
     wallet_trades = trades  # store raw for frontend
 
-    # Aggregate per wallet
+    # ── Aggregate per wallet (existing) ──
     for t in trades:
         addr = t.get("maker", "")
         if not addr:
@@ -335,7 +339,101 @@ async def scan_smart_wallets():
             w["tokens"][sym]["vol"] += vol
             w["tokens"][sym]["last_ts"] = max(w["tokens"][sym]["last_ts"], ts)
 
+    # ── Token-centric aggregation ──
+    for t in trades:
+        addr = t.get("maker", "")
+        base_addr = t.get("base_address", "")
+        if not addr or not base_addr:
+            continue
+
+        info = t.get("maker_info", {})
+        base_token = t.get("base_token", {})
+        sym = base_token.get("symbol", "")
+        side = t.get("side", "")
+        vol = to_float(t.get("amount_usd", 0))
+        balance = to_float(t.get("balance", 0))
+        ts = t.get("timestamp", 0)
+        is_close = t.get("is_open_or_close", 0)
+
+        # Init token entry
+        if base_addr not in smart_tokens_db:
+            smart_tokens_db[base_addr] = {
+                "address": base_addr,
+                "symbol": sym,
+                "name": base_token.get("name", ""),
+                "logo": base_token.get("logo", ""),
+                "mcap": 0.0,
+                "volume_24h": 0.0,
+                "holder_count": 0,
+                "price": 0.0,
+                "price_change_24h": 0.0,
+                "liquidity": 0.0,
+                "smart_inflow": 0.0,
+                "wallets": {},
+                "enriched": False,
+            }
+
+        tk = smart_tokens_db[base_addr]
+        # Update token metadata from trade
+        if sym:
+            tk["symbol"] = sym
+        if base_token.get("name"):
+            tk["name"] = base_token["name"]
+        if base_token.get("logo"):
+            tk["logo"] = base_token["logo"]
+
+        # Calculate inflow contribution
+        if side == "buy":
+            tk["smart_inflow"] += vol
+        else:
+            tk["smart_inflow"] -= vol
+
+        # Init wallet entry on this token
+        if addr not in tk["wallets"]:
+            tk["wallets"][addr] = {
+                "address": addr,
+                "twitter": info.get("twitter_username", ""),
+                "tags": info.get("tags", []),
+                "balance": balance,
+                "buys": 0,
+                "sells": 0,
+                "inflow": 0.0,
+                "last_action_ts": ts,
+                "action_type": "first_buy",
+            }
+        wk = tk["wallets"][addr]
+
+        # Update wallet-on-token stats
+        wk["balance"] = balance
+        wk["last_action_ts"] = max(wk["last_action_ts"], ts)
+        if info.get("twitter_username"):
+            wk["twitter"] = info["twitter_username"]
+        if info.get("tags"):
+            wk["tags"] = info["tags"]
+
+        if side == "buy":
+            wk["buys"] += 1
+            wk["inflow"] += vol
+            if wk["action_type"] == "first_buy":
+                pass  # keep first_buy
+            else:
+                wk["action_type"] = "buy_more"
+        else:
+            wk["sells"] += 1
+            wk["inflow"] -= vol
+            if balance <= 0:
+                wk["action_type"] = "sell_all"
+            else:
+                wk["action_type"] = "sell_partial"
+
+    # Round smart_inflow on tokens
+    for tk in smart_tokens_db.values():
+        tk["smart_inflow"] = round(tk["smart_inflow"], 2)
+        for wk in tk["wallets"].values():
+            wk["inflow"] = round(wk["inflow"], 2)
+
     print(f"[smart-wallets] {len(trades)} trades, {len(wallets_db)} unique wallets tracked")
+    print(f"[smart-tokens] {len(smart_tokens_db)} unique tokens tracked")
 
 
 async def smart_wallet_loop():
@@ -346,6 +444,77 @@ async def smart_wallet_loop():
         except Exception as e:
             print(f"[smart-wallets] error: {e}")
         await asyncio.sleep(SMART_WALLET_INTERVAL)
+
+
+async def smart_token_enrich(token_addr: str):
+    """Enrich a smart token with mcap, volume, holders, price changes."""
+    if token_addr not in smart_tokens_db:
+        return
+
+    info = gmgn_cli("token", "info", "--chain", "sol", "--address", token_addr)
+    if not info:
+        return
+
+    tk = smart_tokens_db[token_addr]
+
+    price_block = info.get("price", {})
+    if isinstance(price_block, dict):
+        tk["price"] = to_float(price_block.get("price", 0))
+        tk["volume_24h"] = to_float(price_block.get("volume_24h", 0))
+        price_now = tk["price"]
+        price_24h = to_float(price_block.get("price_24h", 0))
+        price_1h = to_float(price_block.get("price_1h", 0))
+        tk["price_change_24h"] = round((price_now - price_24h) / price_24h * 100, 2) if price_24h > 0 else 0.0
+        tk["price_change_1h"] = round((price_now - price_1h) / price_1h * 100, 2) if price_1h > 0 else 0.0
+
+    tk["holder_count"] = to_int(info.get("holder_count", tk["holder_count"]))
+    tk["liquidity"] = to_float(info.get("liquidity", tk["liquidity"]))
+
+    mcap = to_float(info.get("market_cap"))
+    if mcap == 0:
+        supply = to_float(info.get("total_supply", 0))
+        price = tk["price"]
+        if supply > 0 and price > 0:
+            mcap = price * supply
+    tk["mcap"] = mcap
+
+    tk["enriched"] = True
+
+
+async def smart_token_enrich_loop():
+    """Background loop: enrich top smart tokens by inflow volume."""
+    while True:
+        await asyncio.sleep(SMART_TOKEN_ENRICH_INTERVAL)
+        try:
+            # Sort by abs(smart_inflow), take top N unenriched
+            candidates = sorted(
+                [t for t in smart_tokens_db.values() if not t.get("enriched")],
+                key=lambda t: abs(t.get("smart_inflow", 0)),
+                reverse=True,
+            )[:SMART_TOKEN_ENRICH_BATCH]
+
+            if candidates:
+                print(f"[smart-token-enrich] Enriching {len(candidates)} tokens...")
+                for t in candidates:
+                    await smart_token_enrich(t["address"])
+                    await asyncio.sleep(SMART_TOKEN_ENRICH_DELAY)
+                print(f"[smart-token-enrich] Done")
+
+            # Re-enrich already enriched tokens that are active (top 5 by inflow)
+            active = sorted(
+                [t for t in smart_tokens_db.values() if t.get("enriched")],
+                key=lambda t: abs(t.get("smart_inflow", 0)),
+                reverse=True,
+            )[:SMART_TOKEN_ENRICH_BATCH]
+
+            for t in active:
+                t["enriched"] = False  # mark for re-enrich
+                await smart_token_enrich(t["address"])
+                await asyncio.sleep(SMART_TOKEN_ENRICH_DELAY)
+                print(f"[smart-token-enrich] Re-enriched {t['symbol']}")
+
+        except Exception as e:
+            print(f"[smart-token-enrich] error: {e}")
 
 
 async def scan_trenches():
@@ -422,7 +591,8 @@ async def startup():
     asyncio.create_task(scanner_loop())
     asyncio.create_task(enrich_loop())
     asyncio.create_task(smart_wallet_loop())
-    print("[startup] Scanner + enricher + smart wallet loops started")
+    asyncio.create_task(smart_token_enrich_loop())
+    print("[startup] Scanner + enricher + smart wallet + smart token enrich loops started")
 
 
 # ── REST Endpoints ──────────────────────────────────────────────────────
@@ -519,68 +689,90 @@ def get_stats():
     }
 
 
-@app.get("/api/smart-wallets")
-def get_smart_wallets(
-    sort: str = Query("vol", regex="^(vol|trades|activity|tokens)$"),
-    tag: Optional[str] = None,
+@app.get("/api/smart-tokens")
+def get_smart_tokens(
+    sort: str = Query("inflow", regex="^(inflow|mcap|holders|volume|wallets)$"),
     limit: int = Query(50, ge=1, le=200),
 ):
-    """Get tracked smart wallets."""
-    wallets = list(wallets_db.values())
-
-    if tag:
-        wallets = [w for w in wallets if tag in w.get("tags", [])]
-
+    """Get smart tokens grouped by token with smart wallet activity."""
+    tokens = list(smart_tokens_db.values())
     now = int(time.time())
+
     sort_key = {
-        "vol": lambda w: w["total_vol"],
-        "trades": lambda w: w["total_trades"],
-        "activity": lambda w: now - w["last_seen"],  # most recent first
-        "tokens": lambda w: len(w["tokens"]),
-    }.get(sort, lambda w: w["total_vol"])
+        "inflow": lambda t: abs(t.get("smart_inflow", 0)),
+        "mcap": lambda t: t.get("mcap", 0),
+        "holders": lambda t: t.get("holder_count", 0),
+        "volume": lambda t: t.get("volume_24h", 0),
+        "wallets": lambda t: len(t.get("wallets", {})),
+    }.get(sort, lambda t: abs(t.get("smart_inflow", 0)))
 
-    descending = sort != "activity"
-    wallets.sort(key=sort_key, reverse=descending)
+    tokens.sort(key=sort_key, reverse=True)
 
-    # Format for frontend
+    # Build unique wallets set across all tokens
+    all_wallets = set()
+
     result = []
-    for w in wallets[:limit]:
-        tokens_list = []
-        for sym, data in sorted(w["tokens"].items(), key=lambda x: x[1]["vol"], reverse=True):
-            tokens_list.append({
-                "symbol": sym,
-                "address": data["address"],
-                "count": data["count"],
-                "vol": round(data["vol"], 2),
-                "last_ts": data["last_ts"],
+    for tk in tokens[:limit]:
+        wallets_list = []
+        for addr, wk in tk["wallets"].items():
+            all_wallets.add(addr)
+
+            # Action string: time since last action + action type
+            age_sec = now - wk["last_action_ts"] if wk["last_action_ts"] else 0
+            if age_sec < 60:
+                age_str = f"{age_sec}s"
+            elif age_sec < 3600:
+                age_str = f"{age_sec // 60}m"
+            elif age_sec < 86400:
+                age_str = f"{age_sec // 3600}h"
+            else:
+                age_str = f"{age_sec // 86400}d"
+
+            action_labels = {
+                "first_buy": "First Buy",
+                "buy_more": "Buy More",
+                "sell_all": "Sell All",
+                "sell_partial": "Sell Partial",
+            }
+            action_str = f"{age_str} {action_labels.get(wk['action_type'], wk['action_type'])}"
+
+            wallets_list.append({
+                "address": wk["address"],
+                "twitter": wk.get("twitter", ""),
+                "tags": wk.get("tags", []),
+                "balance": round(wk["balance"], 2),
+                "buys": wk["buys"],
+                "sells": wk["sells"],
+                "inflow": round(wk["inflow"], 2),
+                "last_action_ts": wk["last_action_ts"],
+                "action_type": wk["action_type"],
+                "action_str": action_str,
             })
 
-        age_sec = now - w["last_seen"]
-        if age_sec < 60:
-            active_str = f"{age_sec}s ago"
-        elif age_sec < 3600:
-            active_str = f"{age_sec // 60}m ago"
-        else:
-            active_str = f"{age_sec // 3600}h ago"
+        # Sort wallets by inflow desc
+        wallets_list.sort(key=lambda w: w["inflow"], reverse=True)
 
         result.append({
-            "address": w["address"],
-            "tags": w["tags"],
-            "twitter": w["twitter"],
-            "first_seen": w["first_seen"],
-            "last_seen": w["last_seen"],
-            "active_str": active_str,
-            "total_trades": w["total_trades"],
-            "buys": w["buys"],
-            "sells": w["sells"],
-            "opens": w["opens"],
-            "closes": w["closes"],
-            "total_vol": round(w["total_vol"], 2),
-            "tokens_count": len(w["tokens"]),
-            "tokens": tokens_list,
+            "address": tk["address"],
+            "symbol": tk["symbol"],
+            "name": tk["name"],
+            "logo": tk["logo"],
+            "mcap": round(tk["mcap"], 2),
+            "volume_24h": round(tk["volume_24h"], 2),
+            "holder_count": tk["holder_count"],
+            "price": tk["price"],
+            "price_change_24h": round(tk.get("price_change_24h", 0), 2),
+            "price_change_1h": round(tk.get("price_change_1h", 0), 2),
+            "liquidity": round(tk["liquidity"], 2),
+            "smart_inflow": round(tk["smart_inflow"], 2),
+            "wallets": wallets_list,
         })
 
-    return {"wallets": result, "total": len(wallets_db), "raw_trades": len(wallet_trades)}
+    return {
+        "tokens": result,
+        "total_tokens": len(smart_tokens_db),
+        "total_wallets": len(all_wallets),
+    }
 
 
 # ── SSE Endpoint ────────────────────────────────────────────────────────

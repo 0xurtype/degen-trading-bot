@@ -140,43 +140,61 @@ tr.row td.r{text-align:right}
 .panel-view{display:none;flex:1;overflow:hidden;flex-direction:column}
 .panel-view.active{display:flex}
 
-/* ═══ SMART WALLETS ═══ */
-.sw-tag-select{background:var(--bg3);color:var(--t3);border:1px solid var(--bdr);border-radius:6px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer;outline:none}
-.sw-tag-select:focus{border-color:var(--cyan-b)}
-.sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px;padding:14px;overflow-y:auto;flex:1}
-.sw-card{background:linear-gradient(135deg,var(--bg3),rgba(20,20,30,.8));border:1px solid var(--bdr);border-radius:12px;padding:14px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
-.sw-card:hover{border-color:var(--cyan-b);transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,.3)}
-.sw-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--cyan),var(--green));opacity:0;transition:opacity .2s}
-.sw-card:hover::before{opacity:1}
-.sw-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.sw-avatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#fff;flex-shrink:0;position:relative}
-.sw-dot{position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;border:2px solid var(--bg2)}
-.sw-dot.hot{background:var(--green)}.sw-dot.warm{background:var(--yellow)}.sw-dot.cold{background:var(--t4)}
-.sw-addr{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px}
-.sw-twitter{font-size:10px;color:var(--cyan);font-weight:600}
-.sw-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
-.sw-tag{font-size:9px;padding:2px 6px;border-radius:4px;font-weight:600;text-transform:uppercase}
-.sw-tag.smart_degen{background:rgba(0,230,118,.15);color:var(--green)}
-.sw-tag.kol{background:rgba(29,185,255,.15);color:var(--cyan)}
-.sw-tag.axiom{background:rgba(168,85,247,.15);color:#a855f7}
-.sw-tag.gmgn{background:rgba(255,165,0,.15);color:#ffa500}
-.sw-tag.fresh_wallet{background:rgba(255,255,100,.15);color:var(--yellow)}
-.sw-tag.top_followed{background:rgba(255,105,180,.15);color:#ff69b4}
-.sw-tag.default{background:rgba(255,255,255,.08);color:var(--t3)}
-.sw-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px}
-.sw-stat{text-align:center}
-.sw-stat-val{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700}
-.sw-stat-lbl{font-size:9px;color:var(--t4);margin-top:2px}
-.sw-tokens{margin-top:10px;border-top:1px solid rgba(255,255,255,.05);padding-top:8px}
-.sw-tokens-title{font-size:10px;color:var(--t3);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
-.sw-token-row{display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.03)}
-.sw-token-row:last-child{border-bottom:none}
-.sw-token-sym{font-weight:700;color:var(--t2)}
-.sw-token-vol{font-family:'JetBrains Mono',monospace;color:var(--t3)}
-.sw-token-addr{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--t4);cursor:pointer}
-.sw-token-addr:hover{color:var(--cyan)}
-.sw-empty{grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--t4)}
-.sw-empty-icon{font-size:40px;margin-bottom:12px;opacity:.5}
+/* ═══ SMART TOKENS ═══ */
+.st-tag-select{background:var(--bg3);color:var(--t3);border:1px solid var(--bdr);border-radius:6px;padding:3px 8px;font-size:11px;font-family:inherit;cursor:pointer;outline:none}
+.st-tag-select:focus{border-color:var(--cyan-b)}
+.st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:12px;padding:14px;overflow-y:auto;flex:1}
+.st-card{background:linear-gradient(135deg,var(--bg3),rgba(20,20,30,.8));border:1px solid var(--bdr);border-radius:12px;transition:all .2s;position:relative}
+.st-card:hover{border-color:var(--cyan-b);transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,.3)}
+.st-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--green),var(--cyan));opacity:0;transition:opacity .2s}
+.st-card:hover::before{opacity:1}
+.st-header{display:flex;align-items:center;gap:10px;padding:12px 14px 8px}
+.st-icon{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#fff;flex-shrink:0;background-size:cover;background-position:center}
+.st-icon-img{width:38px;height:38px;border-radius:50%;object-fit:cover}
+.st-token-info{flex:1;min-width:0}
+.st-token-name{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px}
+.st-token-sym{color:var(--t1)}
+.st-token-full{color:var(--t3);font-weight:400;font-size:12px}
+.st-ca-row{display:flex;align-items:center;gap:4px;margin-top:2px}
+.st-badge{display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase}
+.st-badge.verified{background:var(--green-d);color:var(--green)}
+.st-badge.chain{background:var(--blue-d);color:var(--blue)}
+.st-right{text-align:right;flex-shrink:0}
+.st-inflow{font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:800;white-space:nowrap}
+.st-inflow.pos{color:var(--green)}
+.st-inflow.neg{color:var(--red)}
+.st-inflow-label{font-size:9px;color:var(--t4);text-transform:uppercase;letter-spacing:.5px;margin-top:1px}
+.st-multiplier{display:inline-block;padding:2px 7px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;margin-left:8px}
+.st-multiplier.hot{background:var(--green-d);color:var(--green)}
+.st-multiplier.warm{background:var(--yellow-d);color:var(--yellow)}
+.st-multiplier.cool{background:var(--bg4);color:var(--t3)}
+.st-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:rgba(255,255,255,.03);margin:0 14px;border-radius:8px;overflow:hidden}
+.st-metric{background:var(--bg2);padding:8px 6px;text-align:center}
+.st-metric-icon{font-size:11px;margin-bottom:2px}
+.st-metric-val{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700}
+.st-metric-label{font-size:9px;color:var(--t4);margin-top:1px}
+.st-wallets{padding:0 14px;margin-top:8px}
+.st-wallets-title{font-size:10px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:6px 0 4px;display:flex;align-items:center;justify-content:space-between}
+.st-wallet-table{width:100%}
+.st-wallet-table th{font-size:9px;color:var(--t4);text-transform:uppercase;letter-spacing:.5px;font-weight:600;padding:3px 6px;text-align:left;border-bottom:1px solid rgba(255,255,255,.04)}
+.st-wallet-table th.r{text-align:right}
+.st-wallet-row td{font-size:11px;padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.02);color:var(--t2)}
+.st-wallet-row td.r{text-align:right;font-family:'JetBrains Mono',monospace}
+.st-wallet-addr{font-family:'JetBrains Mono',monospace;font-size:10px;display:flex;align-items:center;gap:4px}
+.st-wallet-addr .copy-btn{opacity:0;pointer-events:none}
+.st-wallet-row:hover .copy-btn{opacity:.6;pointer-events:auto}
+.st-wallet-action{display:flex;align-items:center;gap:4px;font-size:10px;white-space:nowrap}
+.st-wallet-action .age{color:var(--t4);font-family:'JetBrains Mono',monospace}
+.st-wallet-action .act-tag{padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700}
+.st-wallet-action .act-tag.buy{background:var(--green-d);color:var(--green)}
+.st-wallet-action .act-tag.sell{background:var(--red-d);color:var(--red)}
+.st-actions{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid rgba(255,255,255,.04)}
+.st-expand-btn{padding:4px 10px;border-radius:var(--rs);border:1px solid var(--bdr);background:var(--bg4);color:var(--t3);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s}
+.st-expand-btn:hover{border-color:var(--bdr2);color:var(--t2)}
+.st-buy-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 16px;border-radius:var(--rs);border:none;background:linear-gradient(135deg,var(--green2),#00e5ff);color:#000;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit;letter-spacing:.3px;transition:all .2s;text-decoration:none;box-shadow:0 2px 8px rgba(0,230,118,.2);margin-left:auto}
+.st-buy-btn:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,230,118,.35)}
+.st-empty{grid-column:1/-1;text-align:center;padding:60px 20px;color:var(--t4)}
+.st-empty-icon{font-size:40px;margin-bottom:12px;opacity:.5}
 /* ═══ SMART MONEY ═══ */
 .sm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:10px;padding:14px;overflow-y:auto;flex:1}
 .sm-card{background:linear-gradient(135deg,var(--bg3),rgba(20,20,30,.8));border:1px solid var(--bdr);border-radius:12px;padding:14px;cursor:pointer;transition:all .2s}
@@ -474,17 +492,17 @@ tr.row td.r{text-align:right}
 
     <!-- Trending view removed -->
 
-    <!-- SMART WALLETS -->
+    <!-- SMART TOKENS -->
     <div class="panel-view" id="view-smartwallets">
       <div class="tbl-head">
         <div class="pill-row">
-          <button class="pill on" onclick="swSort='vol';renderSmartWallets(this)">By Volume</button>
-          <button class="pill" onclick="swSort='trades';renderSmartWallets(this)">By Trades</button>
-          <button class="pill" onclick="swSort='activity';renderSmartWallets(this)">Most Recent</button>
-          <button class="pill" onclick="swSort='tokens';renderSmartWallets(this)">Diverse</button>
+          <button class="pill on" onclick="swSort='inflow';renderSmartTokens(this)">By Inflow</button>
+          <button class="pill" onclick="swSort='vol';renderSmartTokens(this)">By Volume</button>
+          <button class="pill" onclick="swSort='mcap';renderSmartTokens(this)">By MCap</button>
+          <button class="pill" onclick="swSort='trades';renderSmartTokens(this)">Most Traded</button>
         </div>
         <div class="th-r">
-          <select id="swTag" class="sw-tag-select" onchange="renderSmartWallets()">
+          <select id="swTag" class="st-tag-select" onchange="renderSmartTokens()">
             <option value="">All Tags</option>
             <option value="smart_degen">Smart Degen</option>
             <option value="kol">KOL</option>
@@ -497,7 +515,7 @@ tr.row td.r{text-align:right}
           <div class="live-badge"><div class="dot"></div>LIVE</div>
         </div>
       </div>
-      <div class="sw-grid" id="swGrid"></div>
+      <div class="st-grid" id="stGrid"></div>
     </div>
 
     <!-- KOL ACTIVITY -->
@@ -566,7 +584,7 @@ tr.row td.r{text-align:right}
 <script>
 const $=id=>document.getElementById(id);
 let tokens=[],smartWallets=[],kols=[];
-let selD='all',tMin=5,trendSort='hot',smSort='pnl',kolSort='active',swSort='vol',currentView='scanner';
+let selD='all',tMin=5,trendSort='hot',smSort='pnl',kolSort='active',swSort='inflow',currentView='scanner';
 
 // ═══ WALLET TRACKER STATE ═══
 let trackedWallets=[];
@@ -653,7 +671,7 @@ async function loadLiveData(){
   // If tokens empty, generate mock
   renderScanner();
   renderRightPanel();
-  if(currentView==='smartwallets')renderSmartWallets();
+  if(currentView==='smartwallets')renderSmartTokens();
   if(currentView==='kols')renderKols();
 }
 
@@ -712,7 +730,7 @@ function switchView(el){
   $('view-'+currentView).classList.add('active');
   $('leftPanel').style.display=currentView==='scanner'?'':'none';
   $('scannerTools').style.display=currentView==='scanner'?'flex':'none';
-  if(currentView==='smartwallets')renderSmartWallets();
+  if(currentView==='smartwallets')renderSmartTokens();
   if(currentView==='kols')renderKols();
   if(currentView==='wallets'){renderWalletList();if(selectedWallet)renderWalletDetail(selectedWallet)}
 }
@@ -741,45 +759,67 @@ function renderScanner(){
     return`<tr class="row" onclick="openTokenModal(${ti})"><td style="position:relative"><div class="fl ${flC}"></div><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t4);padding-left:6px">${i+1}</span></td><td><div class="tc" style="align-items:flex-start"><div class="ta" style="background:${t.color}">${t.sym.charAt(0)}</div><div class="tr2"><div class="ts">${esc(t.sym)} ${isNew?'<span class="badge new">NEW</span>':''}</div><div class="tp"><span class="dex ${t.dex==='pump.fun'?'pump':t.dex}">${t.dex}</span></div><div class="ca-wrap" style="margin-top:2px"><span class="ca-text" onclick="copyCA('${t.ca}','${t.sym}',event)">${trunc(t.ca,8)}</span><button class="copy-btn" onclick="copyCA('${t.ca}','${t.sym}',event)">${copySVG} Copy</button></div></div></div></td><td><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t2)">${ago(t.deployed)}</span></td><td><span class="badge ${dS}">${dS.toUpperCase()}</span><br><span style="font-size:10px;color:var(--t4)">${t.devDeploys} dep</span></td><td><div class="kols">${kols}</div></td><td class="r"><div class="sm-c"><span class="sm-n" style="color:${smC}">${t.smartW}</span><div class="sm-b"><div class="sm-f" style="width:${smP}%;background:${smC}"></div></div></div></td><td class="r"><span style="font-family:'JetBrains Mono',monospace;font-size:12px">${fmtP(t.price)}</span></td><td class="r"><span class="pc ${pC}">${t.pc5>0?'+':''}${t.pc5}%</span></td><td class="r"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--t2)">${fmt$(t.liq)}</span></td><td class="r"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--t2)">${fmt$(t.mcap)}</span></td><td class="r"><span style="font-family:'JetBrains Mono',monospace;font-size:12px">${t.holders}</span></td><td class="r"><div style="display:flex;align-items:center;justify-content:flex-end;gap:6px"><svg width="32" height="32" viewBox="0 0 36 36" style="transform:rotate(-90deg)"><circle cx="18" cy="18" r="15" fill="none" stroke="var(--bg5)" stroke-width="3"/><circle cx="18" cy="18" r="15" fill="none" stroke="${scC}" stroke-width="3" stroke-dasharray="94.2" stroke-dashoffset="${scO}" stroke-linecap="round" class="score-ring" style="--offset:${scO}"/></svg><span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:${scC}">${sc}</span></div></td></tr>`}).join('');
 }
 
-// ═══ SMART WALLETS ═══
-let smartWalletCache=null,swLastFetch=0;
-function renderSmartWallets(btn){
+// ═══ SMART TOKENS ═══
+let smartTokenCache=null,stLastFetch=0;
+function renderSmartTokens(btn){
   if(btn){btn.parentElement.querySelectorAll('.pill').forEach(p=>p.classList.remove('on'));btn.classList.add('on')}
   const tagFilter=document.getElementById('swTag')?.value||'';
   const now=Date.now()/1000;
-  if(!smartWalletCache||now-swLastFetch>30){
-    fetch(API+'/api/smart-wallets?sort='+swSort+(tagFilter?'&tag='+tagFilter:''))
+  if(!smartTokenCache||now-stLastFetch>30){
+    fetch(API+'/api/smart-tokens?sort='+swSort+(tagFilter?'&tag='+tagFilter:''))
       .then(r=>r.json()).then(d=>{
-        smartWalletCache=d;swLastFetch=now;
-        _renderSWCards(d.wallets||[]);
+        smartTokenCache=d;stLastFetch=now;
+        _renderSTCards(d.tokens||[]);
       }).catch(e=>{
-        console.error('smart-wallets fetch:',e);
-        _renderSWCards([]);
+        console.error('smart-tokens fetch:',e);
+        _renderSTCards([]);
       });
   }else{
-    _renderSWCards(smartWalletCache.wallets||[]);
+    _renderSTCards(smartTokenCache.tokens||[]);
   }
 }
-function _renderSWCards(wallets){
-  const grid=$('swGrid');const cnt=$('swCnt');
-  if(!wallets.length){
-    grid.innerHTML='<div class="sw-empty"><div class="sw-empty-icon">🔍</div><div>No smart wallets yet<br><small style="color:var(--t4)">Tracking starts automatically</small></div></div>';
-    cnt.textContent='0 wallets';return;
+function _stInflow(v){if(!v)return'$0';const p=v>=0;return(p?'+':'')+fmt$(v)}
+function _stMult(inflow,mcap){if(!mcap)return'';const r=inflow/mcap;if(r>=1)return'+'+Math.round(r)+'X';if(r>=0.01)return'+'+r.toFixed(1)+'X';return'+'+(r*100).toFixed(0)+'%'}
+function _stAction(w){
+  const age=ago((w.last_action_ts||0)*1000);
+  const act=w.action_str||w.action_type||'';
+  return age+' '+act;
+}
+function _renderSTCards(tokensList){
+  const grid=$('stGrid');const cnt=$('swCnt');
+  if(!tokensList.length){
+    grid.innerHTML='<div class="st-empty"><div class="st-empty-icon">🔍</div><div>No smart token data yet<br><small style="color:var(--t4)">Tracking starts automatically</small></div></div>';
+    cnt.textContent='0 tokens';return;
   }
-  cnt.textContent=wallets.length+' wallets';
-  grid.innerHTML=wallets.map(w=>{
-    const addrShort=w.address.slice(0,6)+'...'+w.address.slice(-4);
-    const initials=w.twitter?'@'+w.twitter.charAt(0).toUpperCase():w.address.charAt(0);
-    const now=Date.now()/1000;
-    const ageSec=now-w.last_seen;
-    const activity=ageSec<120?'hot':ageSec<3600?'warm':'cold';
-    const buySellRatio=w.total_trades>0?Math.round(w.buys/w.total_trades*100):50;
-    const volColor=w.total_vol>=1000?'var(--green)':w.total_vol>=100?'var(--cyan)':'var(--t3)';
-    const topTokens=(w.tokens||[]).slice(0,4);
-    const tagColors={smart_degen:'smart_degen',kol:'kol',axiom:'axiom',gmgn:'gmgn',fresh_wallet:'fresh_wallet',top_followed:'top_followed'};
-    const tagHTML=(w.tags||[]).slice(0,3).map(t=>'<span class="sw-tag '+(tagColors[t]||'default')+'">'+t.replace(/_/g,' ')+'</span>').join('');
-    const tokensHTML=topTokens.length?'<div class="sw-tokens"><div class="sw-tokens-title">Top Tokens ('+topTokens.length+'/'+w.tokens_count+')</div>'+topTokens.map(t=>'<div class="sw-token-row"><span class="sw-token-sym">'+esc(t.symbol)+'</span><span class="sw-token-addr" onclick="copyCA(\''+t.address+'\',\''+t.symbol+'\',event)">'+t.address.slice(0,4)+'...'+t.address.slice(-3)+'</span><span class="sw-token-vol">$'+fmtN(t.vol)+'</span></div>').join('')+'</div>':'';
-    return'<div class="sw-card"><div class="sw-header"><div class="sw-avatar" style="background:hsl('+(hashStr(w.address)%360)+',60%,45%)">'+initials+'<div class="sw-dot '+activity+'"></div></div><div style="flex:1;min-width:0"><div class="sw-addr" title="'+w.address+'">'+addrShort+' <button class="copy-btn" style="opacity:.4;pointer-events:auto" onclick="copyCA(\''+w.address+'\',\'wallet\',event)">'+copySVG+'</button></div>'+(w.twitter?'<div class="sw-twitter">@'+esc(w.twitter)+'</div>':'')+'<div class="sw-tags">'+tagHTML+'</div></div></div><div class="sw-stats"><div class="sw-stat"><div class="sw-stat-val" style="color:'+volColor+'">$'+fmtN(w.total_vol)+'</div><div class="sw-stat-lbl">Volume</div></div><div class="sw-stat"><div class="sw-stat-val">'+w.total_trades+'</div><div class="sw-stat-lbl">Trades</div></div><div class="sw-stat"><div class="sw-stat-val" style="color:'+(buySellRatio>=60?'var(--green)':'var(--t3)')+'">'+buySellRatio+'%</div><div class="sw-stat-lbl">Buys</div></div></div>'+tokensHTML+'<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--t4)"><span>Opens: '+w.opens+' · Closes: '+w.closes+'</span><span>'+w.active_str+'</span></div></div>';
+  cnt.textContent=tokensList.length+' tokens';
+  grid.innerHTML=tokensList.map(t=>{
+    const addr=t.address||'';
+    const logo=t.logo||'';
+    const sym=esc(t.symbol||'?');
+    const name=esc(t.name||'');
+    const inflow=t.smart_inflow||0;
+    const inflowPos=inflow>=0;
+    const mcap=t.mcap||0;
+    const vol=t.volume_24h||0;
+    const holders=t.holder_count||0;
+    const pc=t.price_change_24h||0;
+    const pcClass=pc>0?'up':pc<0?'down':'flat';
+    const mult=_stMult(inflow,mcap);
+    const multClass=inflow>mcap*0.5?'hot':inflow>mcap*0.1?'warm':'cool';
+    const wallets=t.wallets||[];
+    const iconStyle=logo?'background-image:url('+esc(logo)+');background-size:cover':'background:'+(t.color||`hsl(${hashStr(addr)%360},60%,50%)`);
+    const iconContent=logo?'':sym.charAt(0);
+    // Wallet sub-table (show up to 4 wallets, expand shows more)
+    const shown=wallets.slice(0,4);
+    const walletRows=shown.map(w=>{
+      const wAddr=trunc(w.address,4);
+      const wBal=fmt$(w.balance||0);
+      const wBuys=w.buys||0;const wSells=w.sells||0;
+      const wInflow=w.inflow||0;const wIPos=wInflow>=0;
+      const wAction=_stAction(w);
+      return`<tr class="st-wallet-row"><td><div class="st-wallet-addr"><span style="color:var(--t2)">${wAddr}</span><button class="copy-btn" onclick="copyCA('${esc(w.address)}','wallet',event)">${copySVG}</button></div></td><td class="r">${wBal}</td><td class="r"><span style="color:var(--green)">${wBuys}</span>/<span style="color:var(--red)">${wSells}</span></td><td class="r"><span style="color:${wIPos?'var(--green)':'var(--red)'}">${_stInflow(wInflow)}</span></td><td><div class="st-wallet-action">${wAction}</div></td></tr>`;
+    }).join('');
+    return`<div class="st-card"><div class="st-header"><div class="st-icon" style="${iconStyle}">${iconContent}</div><div class="st-token-info"><div class="st-token-name"><span class="st-token-sym">${sym}</span><span class="st-token-full">${name}</span>${t.verified?'<span class="st-badge verified">✓ Verified</span>':''}</div><div class="st-ca-row"><span class="ca-text" onclick="copyCA('${esc(addr)}','${sym}',event)">${trunc(addr,8)}</span><button class="copy-btn" onclick="copyCA('${esc(addr)}','${sym}',event)">${copySVG} Copy</button></div></div><div class="st-right"><div class="st-inflow ${inflowPos?'pos':'neg'}">${_stInflow(inflow)}</div><div class="st-inflow-label">Smart Inflow 24h</div><span class="st-multiplier ${multClass}">${mult}</span></div></div><div class="st-metrics"><div class="st-metric"><div class="st-metric-icon">👥</div><div class="st-metric-val">${fmtN(holders)}</div><div class="st-metric-label">Holders</div></div><div class="st-metric"><div class="st-metric-icon">📊</div><div class="st-metric-val">${fmt$(vol)}</div><div class="st-metric-label">24h Volume</div></div><div class="st-metric"><div class="st-metric-icon">💎</div><div class="st-metric-val">${fmt$(mcap)}</div><div class="st-metric-label">Market Cap</div></div><div class="st-metric"><div class="st-metric-icon">📈</div><div class="st-metric-val pc ${pcClass}">${pc>0?'+':''}${pc.toFixed(1)}%</div><div class="st-metric-label">24h Change</div></div></div>${wallets.length?`<div class="st-wallets"><div class="st-wallets-title"><span>Smart Wallets (${wallets.length})</span></div><table class="st-wallet-table"><thead><tr><th>Wallet</th><th class="r">Bal</th><th class="r">24h TXS</th><th class="r">Inflow</th><th>Action</th></tr></thead><tbody>${walletRows}</tbody></table></div>`:''}<div class="st-actions"><button class="st-expand-btn" onclick="this.closest('.st-card').querySelector('.st-wallets').style.display=this.closest('.st-card').querySelector('.st-wallets').style.display==='none'?'':'none'">${wallets.length>4?'Expand All ('+wallets.length+')':'Details'}</button><a class="st-buy-btn" href="https://gmgn.ai/sol/token/${esc(addr)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">⚡ Buy</a></div></div>`;
   }).join('');
 }
 
