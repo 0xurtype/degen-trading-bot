@@ -36,7 +36,9 @@ SCAN_INTERVAL = 30  # seconds between trench scans
 ENRICH_INTERVAL = 60  # seconds between enrichment cycles
 ENRICH_BATCH = 20  # tokens to enrich per cycle
 ENRICH_DELAY = 0.5  # seconds between enrichments (rate limit)
-SEEN_CACHE_SIZE = 2000
+SEEN_CACHE_SIZE = 5000
+SIGNAL_KEYS_FILE = Path(__file__).parent / 'data' / 'signal_keys.json'
+SIGNAL_KEYS_MAX = 3000
 
 DATA_DIR = Path(__file__).parent / "scanner_data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -58,7 +60,25 @@ SMART_TOKEN_ENRICH_BATCH = 5  # max tokens to enrich per cycle
 SMART_TOKEN_ENRICH_DELAY = 2  # seconds between enrichments
 signals_db: list[dict] = []  # detected signals, newest first
 detected_signal_keys: set[str] = set()  # dedup key: f"{signal_type}:{token_addr}"
+
+def load_signal_keys():
+    global detected_signal_keys
+    if SIGNAL_KEYS_FILE.exists():
+        try:
+            detected_signal_keys = set(json.loads(SIGNAL_KEYS_FILE.read_text()))
+        except Exception:
+            detected_signal_keys = set()
+
+
+def save_signal_keys():
+    SIGNAL_KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data = list(detected_signal_keys)[-SIGNAL_KEYS_MAX:]
+    SIGNAL_KEYS_FILE.write_text(json.dumps(data))
+
 TG_CHAT_ID = os.environ.get('TG_CHAT_ID', '6156910362')  # default to user's chat
+
+
+load_signal_keys()
 
 
 def load_seen():
@@ -465,8 +485,10 @@ async def smart_wallet_loop():
             await scan_smart_wallets()
         except Exception as e:
             print(f"[smart-wallets] error: {e}")
-        if len(detected_signal_keys) > 500:
-            detected_signal_keys.clear()
+        if len(detected_signal_keys) > SIGNAL_KEYS_MAX:
+            # Evict oldest half instead of clearing all
+            keys_list = list(detected_signal_keys)
+            detected_signal_keys = set(keys_list[-SIGNAL_KEYS_MAX//2:])
         await asyncio.sleep(SMART_WALLET_INTERVAL)
 
 
@@ -717,6 +739,7 @@ def detect_signals():
         signals_db = new_signals + signals_db
         signals_db = signals_db[:200]  # keep last 200
         print(f'[signals] {len(new_signals)} new signals detected')
+        save_signal_keys()
 
     return new_signals
 
@@ -848,8 +871,27 @@ async def send_discord_alert(signals: list[dict]):
         except urllib.error.HTTPError as e:
             body = e.read().decode() if hasattr(e, 'read') else ''
             print(f'[discord-alert] HTTP {e.code}: {body[:200]}')
+            # Rate limited — wait and retry once
+            if e.code == 429:
+                import json as _j
+                try:
+                    retry_after = _j.loads(body).get('retry_after', 1.0)
+                except Exception:
+                    retry_after = 1.0
+                await asyncio.sleep(retry_after + 0.5)
+                try:
+                    req2 = urllib.request.Request(DISCORD_WEBHOOK_URL, data=payload, headers={
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'Mozilla/5.0'
+                    })
+                    resp2 = urllib.request.urlopen(req2, timeout=15)
+                    print(f'[discord-alert] Retry sent {len(batch)} embeds (HTTP {resp2.getcode()})')
+                except Exception as e2:
+                    print(f'[discord-alert] Retry failed: {e2}')
         except Exception as e:
             print(f'[discord-alert] Error: {e}')
+        # Rate limit: delay between batches
+        await asyncio.sleep(1.5)
 
 
 async def scan_trenches():
