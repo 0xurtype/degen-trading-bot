@@ -1,84 +1,102 @@
-# GMGN Signal Scanner
+# FarmTown Auto-Farm Bot
 
-Token scanner & wallet tracker for Solana memecoins. Single-file app with Docker deployment.
+Browser automation bot for [farmtown.online](https://www.farmtown.online/) — a Solana multiplayer farming game.
 
-## Features
-
-- **Token Scanner** — real-time feed with KOL buys, smart wallets, snipers, holder count
-- **Trending** — hot tokens ranked by volume, price action, holder growth
-- **Smart Money Tracker** — whale and sniper wallet activity with PnL
-- **KOL Activity** — influencer calls, hit rates, recent trades
-- **Wallet Tracker** — track any Solana wallet, view trades and PnL
-- **Signal Filters** — KOL buys, smart wallets, snipers, dev checks, safety filters
-
-## Quick Start
-
-### Docker (recommended)
+## Setup
 
 ```bash
-docker compose up -d --build
-# → http://localhost
+pip install playwright
+python -m playwright install chromium
 ```
 
-### Node (local dev)
+## Usage
 
 ```bash
-npm run dev
-# → http://localhost:3000
+# Default: auto-select best crop, headed browser
+python farmbot.py
+
+# Farm specific crop
+python farmbot.py --crop potato
+python farmbot.py --crop cucumber
+
+# Slower actions (safer)
+python farmbot.py --delay 3
+
+# Headless mode (after first setup)
+python farmbot.py --headless
 ```
 
-### Static hosting
+## First Run
 
-Serve `public/` with any HTTP server:
+1. Script opens Chromium browser
+2. **Solve Cloudflare CAPTCHA** manually
+3. Click **"Connect Phantom"** → approve in Phantom extension
+4. Enter farm name → click **"Start My Farm"**
+5. Bot takes over from there
 
-```bash
-npx serve public -l 3000
-# or
-python3 -m http.server 3000 --directory public
+Browser profile is saved in `~/.farmtown-bot-profile/` — wallet connection persists across runs.
+
+## Crop Strategy
+
+| Crop | Grow Time | Level | Gold/XP | Best For |
+|------|-----------|-------|---------|----------|
+| Potato | 2min | 1 | 60/4 | Active AFK |
+| Carrot | 2min | 1 | 40/4 | Active AFK |
+| Corn | 5min | 1 | 95/7 | Semi-AFK |
+| Tomato | 8min | 5 | 200/14 | Semi-AFK |
+| Onion | 12min | 5 | 330/22 | Passive |
+| Wheat | 18min | 5 | 560/32 | Passive |
+| Pumpkin | 30min | 10 | 1050/55 | AFK |
+| Cucumber | 60min | 10 | 2400/105 | AFK |
+| Blueberry | 3h | 15 | 8800/280 | Deep AFK |
+| Dragonfruit | 8h | 25 | 28000/500 | Sleep cycle |
+| Starfruit | 18h | 30 | 100000/1200 | Full AFK |
+
+**`--crop auto`** picks highest XP/second crop you can afford.
+
+## How It Works
+
+- Uses **Playwright** (real Chromium browser) — no protocol hacking
+- Intercepts **Socket.IO** WebSocket events to read game state
+- Emits game events through the same WebSocket to perform actions
+- Random delays between actions for human-like behavior
+- Persistent browser profile keeps Phantom wallet session
+
+## Safety
+
+- Real browser, real network — identical to manual play
+- No wallet private keys in the script
+- No exploits or protocol manipulation
+- Random action delays
+- Rate-limited actions
+
+## Architecture
+
+```
+farmbot.py
+├── GameState      — tracks farm state from WS events
+├── FarmBot        — main bot engine
+│   ├── _setup_ws_interceptor()  — injects JS to hook Socket.IO
+│   ├── _wait_for_auth()         — waits for user auth
+│   ├── _farm_loop()             — main cycle
+│   │   ├── _tick()              — one farming cycle
+│   │   │   ├── harvest ready crops
+│   │   │   ├── plant on empty soil
+│   │   │   ├── buy seeds if low
+│   │   │   ├── complete ready orders
+│   │   │   └── claim Farmer's Pool
+│   │   └── _process_events()    — parse WS events
+│   └── _emit()                  — send game actions
+└── WebSocket interceptor JS    — hooks Socket.IO emit/on
 ```
 
-## Deploy to VPS
+## Discord
 
-### Docker
+If FarmTown Discord alerts wanted, add webhook integration similar to GMGN-scanner.
 
-```bash
-ssh user@your-vps-ip
-git clone https://github.com/0xurtype/GMGN-scanner.git
-cd GMGN-scanner
-docker compose up -d --build
-```
+## Known Limits
 
-### Bare Nginx
-
-```bash
-sudo apt install nginx -y
-git clone https://github.com/0xurtype/GMGN-scanner.git
-sudo cp -r GMGN-scanner/public/* /var/www/html/
-sudo systemctl restart nginx
-```
-
-## Project Structure
-
-```
-GMGN-scanner/
-├── public/
-│   └── index.html          Single-file app (HTML + CSS + JS)
-├── package.json
-├── Dockerfile              Nginx + Alpine container
-├── nginx.conf              Nginx config with security headers
-├── docker-compose.yaml     One-command deploy
-└── .gitignore
-```
-
-## Roadmap
-
-- [ ] Replace mock data with real API calls (Helius, Birdeye, Jupiter)
-- [ ] Wallet authentication (Phantom / Solflare)
-- [ ] Backend service (Node/Go + PostgreSQL) for wallet persistence
-- [ ] WebSocket real-time feed
-- [ ] Rate limiting & caching layer
-- [ ] Auth & billing
-
-## License
-
-MIT
+- Cloudflare Turnstile must be solved manually (first session only)
+- Phantom wallet connection must be approved manually (first session only)
+- Server full → waits in queue automatically
+- Bot stops if WebSocket disconnects (reconnects on restart)
