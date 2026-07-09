@@ -52,7 +52,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 # Install deps
-pip install solders solana aiohttp fastapi uvicorn sse-starlette pandas numpy
+pip install -r requirements.txt
 ```
 
 ### 2 — Wallet Setup
