@@ -23,7 +23,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Query
+import urllib.parse
+
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
@@ -39,7 +41,7 @@ ENRICH_DELAY = 0.5  # seconds between enrichments (rate limit)
 SEEN_CACHE_SIZE = 5000
 SIGNAL_KEYS_FILE = Path(__file__).parent / 'data' / 'signal_keys.json'
 SIGNAL_KEYS_MAX = 3000
-SIGNAL_KEY_TTL = 6 * 3600  # 6 hours before signal key expires (re-alert allowed)
+SIGNAL_KEY_TTL = 4 * 3600  # 4 hours (was 6h) — re-alert window
 
 DATA_DIR = Path(__file__).parent / "scanner_data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -56,9 +58,9 @@ wallets_db: dict[str, dict] = {}  # smart wallets keyed by address
 smart_tokens_db: dict[str, dict] = {}  # smart tokens keyed by base_address
 wallet_trades: list = []  # raw trades from last poll
 SMART_WALLET_INTERVAL = 60  # seconds between smart wallet polls
-SMART_TOKEN_ENRICH_INTERVAL = 30  # seconds between token enrich cycles
-SMART_TOKEN_ENRICH_BATCH = 5  # max tokens to enrich per cycle
-SMART_TOKEN_ENRICH_DELAY = 2  # seconds between enrichments
+SMART_TOKEN_ENRICH_INTERVAL = 15  # seconds between token enrich cycles (was 30)
+SMART_TOKEN_ENRICH_BATCH = 10  # max tokens to enrich per cycle (was 5)
+SMART_TOKEN_ENRICH_DELAY = 1  # seconds between enrichments (was 2)
 signals_db: list[dict] = []  # detected signals, newest first
 detected_signal_keys: dict[str, float] = {}  # dedup key → timestamp
 
@@ -488,6 +490,16 @@ async def scan_smart_wallets():
     # Detect signals after aggregation
     new_signals = detect_signals()
     if new_signals:
+        # Log signals for backtesting
+        try:
+            log_path = Path(__file__).parent / 'data' / 'signals_log.jsonl'
+            now_str = datetime.utcfromtimestamp(time.time()).strftime('%Y-%m-%dT%H:%M:%SZ')
+            with open(log_path, 'a') as f:
+                for s in new_signals:
+                    record = {**s, '_logged_at': now_str}
+                    f.write(json.dumps(record, default=str) + '\n')
+        except Exception as e:
+            print(f'[signal-log] failed: {e}')
         try:
             await send_discord_alert(new_signals)
         except Exception as e:
@@ -620,11 +632,35 @@ async def smart_token_enrich_loop():
             print(f"[smart-token-enrich] error: {e}")
 
 
+STABLECOIN_SYMBOLS = {'USDC', 'USDT', 'DAI', 'CASH', 'USD', 'BUSD', 'USDD', 'FRAX', 'PYUSD', 'FDUSD', 'USDE', 'SDAI', 'LUSD', 'TUSD', 'USDP', 'GUSD', 'HUSD', 'MIM', 'ALUSD', 'DOLA', 'MAI', 'EURC', 'EUROC'}
+STABLECOIN_ADDRESSES = {
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC Solana
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT Solana
+    'So11111111111111111111111111111111111111112',       # WSOL
+}
+
+def _is_stablecoin(token_data: dict) -> bool:
+    """Check if token is a stablecoin or wrapped asset."""
+    symbol = token_data.get('symbol', '').upper()
+    addr = token_data.get('token_address', '') or token_data.get('address', '')
+    if symbol in STABLECOIN_SYMBOLS:
+        return True
+    if addr in STABLECOIN_ADDRESSES:
+        return True
+    # Stablecoins have near-$1 price, massive holder counts, high liq
+    price = to_float(token_data.get('price', 0))
+    if 0.99 <= price <= 1.01 and token_data.get('holder_count', 0) > 50000:
+        return True
+    return False
+
 ACCUMULATION_WINDOW = 7200  # 2 hours in seconds
 ACCUMULATION_MIN_WALLETS = 2  # minimum smart wallets to trigger
-LARGE_BUY_THRESHOLD = 500  # USD
+LARGE_BUY_THRESHOLD = 1000  # USD (was 500)
 CONCENTRATION_THRESHOLD = 0.10  # 10% of volume
-MAX_TOKEN_AGE = 172800  # 2 days in seconds
+MAX_TOKEN_AGE = 31536000  # 1 year (was 2 days)
+DORMANT_WALLET_THRESHOLD = 86400  # 24h — wallets inactive longer than this are filtered out
+EXIT_FULL_THRESHOLD = 0.95  # sell >= 95% of balance = full exit
+EXIT_PARTIAL_MIN_USD = 5000  # partial sell only alerts if wallet position was >$5K
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL', '')
 
 def _enrich_dev(signal: dict):
@@ -644,11 +680,58 @@ def _enrich_dev(signal: dict):
     signal['liquidity'] = info.get('liquidity', 0) or smart_info.get('liquidity', 0)
     signal['holders'] = info.get('holder_count', 0) or smart_info.get('holder_count', 0)
     signal['twitter'] = info.get('twitter', '') or smart_info.get('twitter', '')
+    signal['twitter_followers'] = info.get('twitter_followers', 0) or smart_info.get('twitter_followers', 0)
     signal['smart_wallet_count'] = info.get('smart_degen_count', 0) or smart_info.get('smart_wallet_count', 0)
     signal['renowned_wallet_count'] = info.get('renowned_count', 0) or smart_info.get('renowned_wallet_count', 0)
     signal['sniper_count'] = info.get('sniper_count', 0) or smart_info.get('sniper_count', 0)
     signal['top_10_holder_rate'] = info.get('top10_rate', 0) or smart_info.get('top_10_holder_rate', 0)
+    signal['progress'] = info.get('progress', 0) or smart_info.get('progress', 0)
+    # Price at signal time
+    signal['price'] = to_float(info.get('price', 0)) or to_float(smart_info.get('price', 0)) or 0
+    signal['volume_24h'] = to_float(info.get('volume_24h', 0)) or to_float(smart_info.get('volume_24h', 0)) or 0
+    # Smart wallet conviction: total smart inflow as % of supply
+    mcap = signal.get('mcap', 0)
+    total_smart = signal.get('total_usd', 0) or abs(signal.get('inflow_usd', 0))
+    if mcap > 0 and total_smart > 0:
+        signal['smart_conviction_pct'] = round(total_smart / mcap * 100, 2)
+    else:
+        signal['smart_conviction_pct'] = 0
     return signal
+
+def _resolve_mcap(token_addr: str, smart_data: dict) -> float:
+    """Get mcap: smart_tokens_db > tokens_db > price*supply."""
+    mcap = smart_data.get('mcap', 0)
+    if mcap > 0:
+        return mcap
+    tinfo = tokens_db.get(token_addr, {})
+    mcap = to_float(tinfo.get('market_cap', 0))
+    if mcap > 0:
+        return mcap
+    # Final fallback: price * total_supply from GMGN
+    info = gmgn_cli('token', 'info', '--chain', 'sol', '--address', token_addr)
+    if info:
+        mcap_raw = to_float(info.get('market_cap'))
+        if mcap_raw > 0:
+            return mcap_raw
+        supply = to_float(info.get('total_supply', 0))
+        price = to_float(info.get('price', {}).get('price', 0)) if isinstance(info.get('price'), dict) else 0
+        if supply > 0 and price > 0:
+            return price * supply
+    return 0.0
+
+
+def _is_dormant(w: dict, now: int) -> bool:
+    """True if wallet's last action is older than DORMANT_WALLET_THRESHOLD."""
+    last_ts = w.get('last_action_ts', 0)
+    return (now - last_ts) > DORMANT_WALLET_THRESHOLD if last_ts else True
+
+
+def _wallet_label(w: dict) -> str:
+    """Full wallet address + optional twitter tag."""
+    addr = w.get('address', '')
+    tw = w.get('twitter', '')
+    return f'@{tw} ({addr})' if tw else addr
+
 
 def detect_signals():
     """Scan recent trades for pre-hype patterns."""
@@ -664,8 +747,15 @@ def detect_signals():
         if symbol in ('SOL', 'WSOL', 'WETH', 'WBTC') or token_addr in ('So11111111111111111111111111111111111111112',):
             continue
 
-        wallets = list(token_data.get('wallets', {}).values())
-        mcap = token_data.get('mcap', 0)
+        # Skip stablecoins
+        if _is_stablecoin(token_data):
+            continue
+
+        all_wallets = list(token_data.get('wallets', {}).values())
+        # Filter out dormant wallets
+        wallets = [w for w in all_wallets if not _is_dormant(w, now)]
+
+        mcap = _resolve_mcap(token_addr, token_data)
         volume = token_data.get('volume_24h', 0)
 
         # Get token age from tokens_db (trenches data)
@@ -681,8 +771,13 @@ def detect_signals():
             total_inflow = sum(w.get('inflow', 0) for w in buy_wallets)
             wallet_details = []
             for w in buy_wallets:
-                label = w.get('twitter', '') or w.get('address', '')[:8]
-                wallet_details.append(label)
+                wallet_details.append({
+                    'address': w.get('address', ''),
+                    'twitter': w.get('twitter', ''),
+                    'tags': w.get('tags', []),
+                    'inflow': round(w.get('inflow', 0), 2),
+                    'action': w.get('action_type', ''),
+                })
             key = f'accumulation:{token_addr}'
             if key not in detected_signal_keys:
                 age_hours = round(age_sec / 3600, 1)
@@ -695,6 +790,8 @@ def detect_signals():
                     'total_usd': round(total_inflow, 2),
                     'mcap': mcap,
                     'volume_24h': volume,
+                    'liquidity': token_data.get('liquidity', 0),
+                    'holders': token_data.get('holder_count', 0),
                     'wallets': wallet_details,
                     'details': f'{len(buy_wallets)} smart wallets bought in {round((now - min(w.get("last_action_ts", now) for w in buy_wallets)) / 3600, 1)}h',
                     'age_hours': age_hours,
@@ -709,17 +806,19 @@ def detect_signals():
             if w.get('inflow', 0) >= LARGE_BUY_THRESHOLD and w.get('action_type') in ('first_buy', 'buy_more'):
                 key = f'large_buy:{token_addr}:{w["address"]}'
                 if key not in detected_signal_keys:
-                    label = w.get('twitter', '') or w.get('address', '')[:8]
                     signal = {
                         'type': 'large_buy',
                         'token': symbol,
                         'token_name': name,
                         'token_address': token_addr,
-                        'wallet': label,
+                        'wallet': _wallet_label(w),
                         'wallet_address': w.get('address', ''),
+                        'wallet_tags': w.get('tags', []),
                         'amount': round(w.get('inflow', 0), 2),
                         'mcap': mcap,
                         'volume_24h': volume,
+                        'liquidity': token_data.get('liquidity', 0),
+                        'holders': token_data.get('holder_count', 0),
                         'age_hours': round(age_sec / 3600, 1),
                         'timestamp': now,
                         'confidence': min(90, 50 + (20 if w.get('inflow', 0) >= 1000 else 0) + (10 if mcap < 300000 else 0)),
@@ -733,6 +832,7 @@ def detect_signals():
             if concentration >= CONCENTRATION_THRESHOLD:
                 key = f'concentration:{token_addr}'
                 if key not in detected_signal_keys:
+                    wallet_labels = [_wallet_label(w) for w in wallets[:5]]
                     signal = {
                         'type': 'concentration',
                         'token': symbol,
@@ -742,10 +842,61 @@ def detect_signals():
                         'volume_24h': volume,
                         'concentration_pct': round(concentration * 100, 1),
                         'wallet_count': len(wallets),
+                        'wallets': wallet_labels,
                         'mcap': mcap,
+                        'liquidity': token_data.get('liquidity', 0),
+                        'holders': token_data.get('holder_count', 0),
                         'age_hours': round(age_sec / 3600, 1),
                         'timestamp': now,
                         'confidence': min(85, 40 + round(concentration * 100) + (10 if mcap < 500000 else 0)),
+                    }
+                    new_signals.append(_enrich_dev(signal))
+                    detected_signal_keys[key] = time.time()
+
+        # --- SIGNAL 4: Smart Money Exit ---
+        for w in all_wallets:  # use ALL wallets (including dormant) for exit detection
+            balance = w.get('balance', 0)
+            sells = w.get('sells', 0)
+            inflow = w.get('inflow', 0)  # negative = net sell
+            action = w.get('action_type', '')
+            last_ts = w.get('last_action_ts', 0)
+            tags = w.get('tags', [])
+
+            # Skip if no sells or not recent enough
+            if sells == 0 or (now - last_ts) > ACCUMULATION_WINDOW:
+                continue
+
+            sell_usd = abs(inflow) if inflow < 0 else 0
+            if sell_usd < 100:
+                continue  # ignore dust sells
+
+            is_full_exit = action == 'sell_all' or (balance <= 0 and sell_usd > 0)
+            is_large_partial = (not is_full_exit and sell_usd >= EXIT_PARTIAL_MIN_USD)
+
+            if is_full_exit or is_large_partial:
+                exit_type = 'full_exit' if is_full_exit else 'partial_exit'
+                key = f'{exit_type}:{token_addr}:{w["address"]}'
+                if key not in detected_signal_keys:
+                    label = _wallet_label(w)
+                    signal = {
+                        'type': 'smart_exit',
+                        'exit_type': exit_type,
+                        'token': symbol,
+                        'token_name': name,
+                        'token_address': token_addr,
+                        'wallet': label,
+                        'wallet_address': w.get('address', ''),
+                        'wallet_tags': tags,
+                        'sell_usd': round(sell_usd, 2),
+                        'remaining_balance': round(balance, 2),
+                        'total_trades': sells,
+                        'mcap': mcap,
+                        'volume_24h': volume,
+                        'liquidity': token_data.get('liquidity', 0),
+                        'holders': token_data.get('holder_count', 0),
+                        'age_hours': round(age_sec / 3600, 1),
+                        'timestamp': now,
+                        'confidence': min(90, 50 + (20 if sell_usd >= 5000 else 0) + (20 if is_full_exit else 0)),
                     }
                     new_signals.append(_enrich_dev(signal))
                     detected_signal_keys[key] = time.time()
@@ -765,8 +916,14 @@ async def send_discord_alert(signals: list[dict]):
     if not signals or not DISCORD_WEBHOOK_URL:
         return
 
-    color_map = {'accumulation': 0xFF6600, 'large_buy': 0x00CC44, 'concentration': 0x3366FF}
-    emoji_map = {'accumulation': '🔥', 'large_buy': '💰', 'concentration': '📊'}
+    color_map = {
+        'accumulation': 0xFF6600, 'large_buy': 0x00CC44,
+        'concentration': 0x3366FF, 'smart_exit': 0xFF0000,
+    }
+    emoji_map = {
+        'accumulation': '🔥', 'large_buy': '💰',
+        'concentration': '📊', 'smart_exit': '🚨',
+    }
     dev_emoji = {'clean': '✅', 'warn': '⚠️', 'risky': '🚨', 'unknown': '❓'}
 
     embeds = []
@@ -777,6 +934,8 @@ async def send_discord_alert(signals: list[dict]):
         addr = s.get('token_address', '')
         symbol = s.get('token', '???')
         gmgn_url = f'https://gmgn.ai/sol/token/{addr}'
+        dex_url = f'https://dexscreener.com/solana/{addr}'
+        birdeye_url = f'https://birdeye.so/token/{addr}?chain=solana'
 
         # Title
         title = f'{emoji} {sig_type.upper()} — ${symbol}'
@@ -793,12 +952,25 @@ async def send_discord_alert(signals: list[dict]):
         elif sig_type == 'concentration':
             desc_lines.append(f'**{s.get("concentration_pct", 0)}%** of 24h volume from smart wallets')
             desc_lines.append(f'Inflow: **${s.get("inflow_usd", 0):,.2f}** from **{s.get("wallet_count", 0)}** wallets')
+        elif sig_type == 'smart_exit':
+            exit_t = s.get('exit_type', 'unknown')
+            if exit_t == 'full_exit':
+                desc_lines.append(f'**SMART MONEY FULL EXIT**')
+                desc_lines.append(f'Sold: **${s.get("sell_usd", 0):,.2f}** — all positions cleared')
+            else:
+                desc_lines.append(f'**Smart Money Partial Exit**')
+                desc_lines.append(f'Sold: **${s.get("sell_usd", 0):,.2f}**')
+            desc_lines.append(f'**{s.get("wallet", "?")}**')
         description = '\n'.join(desc_lines)
 
         fields = []
 
         # Contract — always show full address
         fields.append({'name': '📋 Contract', 'value': f'`{addr}`', 'inline': False})
+
+        # Links
+        links = f'[GMGN]({gmgn_url}) • [DexScreener]({dex_url}) • [Birdeye]({birdeye_url})'
+        fields.append({'name': '🔗 Links', 'value': links, 'inline': False})
 
         # Dev info
         creator = s.get('creator', '')
@@ -823,6 +995,7 @@ async def send_discord_alert(signals: list[dict]):
         vol = s.get('volume_24h', 0)
         liq = s.get('liquidity', 0)
         holders = s.get('holders', 0)
+        progress = s.get('progress', 0)
         mcap_str = f'${mcap:,.0f}' if mcap > 0 else 'N/A'
         vol_str = f'${vol:,.0f}' if vol > 0 else 'N/A'
         liq_str = f'${liq:,.0f}' if liq > 0 else 'N/A'
@@ -831,11 +1004,31 @@ async def send_discord_alert(signals: list[dict]):
         fields.append({'name': '💧 Liquidity', 'value': liq_str, 'inline': True})
         if holders > 0:
             fields.append({'name': '👥 Holders', 'value': str(holders), 'inline': True})
+        if progress > 0:
+            fields.append({'name': '📊 Bonding Curve', 'value': f'**{progress:.1f}%**', 'inline': True})
 
-        # Wallet list
+        # Wallet list — full addresses with tags (max 3)
         wallets = s.get('wallets', [])
-        if wallets:
-            wallet_list = '\n'.join(f'• `{w}`' for w in wallets[:5])
+        if wallets and isinstance(wallets[0], dict):
+            lines = []
+            for w in wallets[:3]:
+                w_addr = w.get('address', '?')
+                tw = w.get('twitter', '')
+                tags = w.get('tags', [])
+                inflow = w.get('inflow', 0)
+                tag_str = ' '.join(f'`{t}`' for t in tags[:2]) if tags else ''
+                label = f'@{tw} ({w_addr})' if tw else f'`{w_addr}`'
+                arrow = '🟢' if inflow > 0 else '🔴'
+                line = f'{arrow} {label}'
+                if tag_str:
+                    line += f' {tag_str}'
+                line += f' `${abs(inflow):,.0f}`'
+                lines.append(line)
+            if len(wallets) > 3:
+                lines.append(f'+{len(wallets) - 3} more')
+            fields.append({'name': '🧠 Smart Wallets', 'value': '\n'.join(lines), 'inline': False})
+        elif wallets and isinstance(wallets[0], str):
+            wallet_list = '\n'.join(f'• `{w}`' for w in wallets[:3])
             fields.append({'name': '🧠 Smart Wallets', 'value': wallet_list, 'inline': False})
 
         # Token intelligence
@@ -852,10 +1045,22 @@ async def send_discord_alert(signals: list[dict]):
         if top10:
             fields.append({'name': '🏆 Top 10 Holders', 'value': f'**{top10}%**', 'inline': True})
 
-        # Twitter if available
+        # Smart wallet conviction
+        conviction = s.get('smart_conviction_pct', 0)
+        if conviction > 0:
+            fields.append({'name': '💎 Smart Conviction', 'value': f'**{conviction:.2f}%** of MCap', 'inline': True})
+
+        # Twitter with followers
         twitter = s.get('twitter', '')
+        followers = s.get('twitter_followers', 0)
         if twitter:
-            fields.append({'name': '🐦 Twitter', 'value': f'@{twitter}', 'inline': True})
+            tw_str = f'@{twitter}'
+            if followers > 0:
+                if followers >= 100000:
+                    tw_str += f' (**{followers/1000:.0f}K** followers)'
+                else:
+                    tw_str += f' (**{followers:,}** followers)'
+            fields.append({'name': '🐦 Twitter', 'value': tw_str, 'inline': True})
 
         confidence = s.get('confidence', 0)
         conf_label = 'HIGH' if confidence >= 80 else 'MID' if confidence >= 60 else 'LOW'
@@ -871,8 +1076,8 @@ async def send_discord_alert(signals: list[dict]):
         }
         embeds.append(embed)
 
-    # Discord max 10 embeds per message
-    for batch in [embeds[i:i+10] for i in range(0, len(embeds), 10)]:
+    # Discord max 6000 chars per message — batch conservatively
+    for batch in [embeds[i:i+5] for i in range(0, len(embeds), 5)]:
         try:
             print(f'[discord-alert] Sending {len(batch)} embeds...')
             payload = json.dumps({'embeds': batch}).encode()
@@ -1202,6 +1407,318 @@ async def stream_tokens():
                 sse_subscribers.remove(queue)
 
     return EventSourceResponse(event_generator())
+
+
+# ── Labeling Logic ─────────────────────────────────────────────────────
+
+KNOWN_CEX_KEYWORDS = [
+    "binance", "coinbase", "okx", "bybit", "kucoin", "gate", "huobi", "kraken",
+    "mexc", "bitget", "crypto.com", "gemini", "bitfinex", "kraken", "binance",
+]
+
+KNOWN_CEX_ADDRESSES: set = set()  # populated lazily from native_transfer data
+
+
+def _label_holder(h: dict) -> list[str]:
+    """Apply all labels to a single holder dict. Returns list of label dicts with type + confidence."""
+    labels = []
+    tag_list = h.get("tags", []) or []
+    token_tag_list = h.get("maker_token_tags", []) or []
+    tags = {t.lower() for t in tag_list if isinstance(t, str)}
+    token_tags = {t.lower() for t in token_tag_list if isinstance(t, str)}
+    native_name = (h.get("native_transfer") or {}).get("name", "") or ""
+    exchange = (h.get("exchange") or "").lower()
+    amt_pct = to_float(h.get("amount_percentage", 0))
+    buys = to_int(h.get("buy_tx_count_cur", 0))
+    sells = to_int(h.get("sell_tx_count_cur", 0))
+    is_new = h.get("is_new", False)
+
+    # ── exchange ──
+    if exchange and exchange not in ("", "0"):
+        labels.append({"type": "exchange", "label": exchange.upper(), "color": "purple"})
+    elif native_name and any(kw in native_name.lower() for kw in KNOWN_CEX_KEYWORDS):
+        labels.append({"type": "exchange", "label": native_name, "color": "purple"})
+
+    # ── dev/founder ──
+    if "creator" in token_tags or "dev_team" in token_tags:
+        labels.append({"type": "dev/founder", "label": "DEV", "color": "red"})
+
+    # ── smart_money / kol ──
+    smart_tags = {"axiom", "padre", "alpha", "degentrading", "gmgn"}
+    if tags & smart_tags:
+        labels.append({"type": "smart_money", "label": "SMART", "color": "cyan"})
+    # cross-ref via GMGN smart money data (lazy — enrich on click)
+    # kol labels come from wallet_tags_stat / twitter_username presence
+
+    # ── sniper / bundler ──
+    if "sniper" in token_tags:
+        labels.append({"type": "sniper", "label": "SNIPER", "color": "orange"})
+    if "bundler" in tags or "bundler" in token_tags:
+        labels.append({"type": "bundler", "label": "BUNDLER", "color": "magenta"})
+
+    # ── fresh_wallet ──
+    if is_new or "fresh_wallet" in tags:
+        labels.append({"type": "fresh_wallet", "label": "FRESH", "color": "yellow"})
+
+    # ── whale (>1% supply) ──
+    if amt_pct >= 0.01:
+        labels.append({"type": "whale", "label": f"WHALE {amt_pct*100:.1f}%", "color": "gold"})
+
+    # ── diamond_hands (never sold) ──
+    if sells == 0 and buys > 0:
+        labels.append({"type": "diamond_hands", "label": "💎 HODL", "color": "green"})
+
+    # ── paper_hands (sold ≥80% of bought) ──
+    buy_vol = to_float(h.get("buy_volume_cur", 0))
+    sell_vol = to_float(h.get("sell_volume_cur", 0))
+    if buy_vol > 0 and sell_vol / buy_vol >= 0.8:
+        labels.append({"type": "paper_hands", "label": "🧻 PAPER", "color": "gray"})
+
+    return labels
+
+
+def _resolve_owner_name(h: dict) -> str:
+    """Resolve wallet owner name. Priority: name → twitter → native_transfer.name."""
+    name = h.get("name") or ""
+    if name:
+        return name
+    tw = h.get("twitter_username") or h.get("twitter_name") or ""
+    if tw:
+        return f"@{tw}"
+    native = (h.get("native_transfer") or {}).get("name") or ""
+    if native:
+        return native
+    # fallback: first/last 4 of address
+    addr = h.get("address", "")
+    return f"{addr[:4]}...{addr[-4:]}" if len(addr) > 8 else addr
+
+
+# ── Holder Analysis Endpoints ─────────────────────────────────────────
+
+
+@app.get("/api/holders")
+def get_holders(
+    chain: str = Query("sol", regex="^(sol|bsc|base|eth)$"),
+    address: str = Query(...),
+    limit: int = Query(50, ge=1, le=100),
+    tag_filter: Optional[str] = Query(None, description="Comma-separated label types to show"),
+):
+    """
+    Get top holders for a token with full labeling.
+    Fresh lookup every call — no caching.
+    """
+    raw = gmgn_cli("token", "holders", "--chain", chain, "--address", address,
+                    "--limit", str(limit), "--order-by", "amount_percentage", "--direction", "desc", "--raw")
+    holders_raw = raw.get("list", [])
+
+    if not holders_raw:
+        # retry with smaller limit
+        raw = gmgn_cli("token", "holders", "--chain", chain, "--address", address,
+                        "--limit", "100", "--raw")
+        holders_raw = raw.get("list", [])
+
+    # Build labeled result
+    holders = []
+    for h in holders_raw:
+        labels = _label_holder(h)
+        owner_name = _resolve_owner_name(h)
+        # Extract funding source
+        native = h.get("native_transfer") or {}
+        token_in = h.get("token_transfer_in") or {}
+        token_out = h.get("token_transfer_out") or {}
+
+        entry = {
+            "rank": len(holders) + 1,
+            "address": h.get("address", ""),
+            "account_address": h.get("account_address", ""),
+            "owner_name": owner_name,
+            "balance": to_float(h.get("balance", 0)),
+            "amount_percentage": to_float(h.get("amount_percentage", 0)),
+            "usd_value": to_float(h.get("usd_value", 0)),
+            "avg_cost": to_float(h.get("avg_cost")),
+            "profit": to_float(h.get("profit", 0)),
+            "profit_change": to_float(h.get("profit_change")),
+            "realized_profit": to_float(h.get("realized_profit", 0)),
+            "unrealized_profit": to_float(h.get("unrealized_profit", 0)),
+            "buy_volume_usd": to_float(h.get("buy_volume_cur", 0)),
+            "sell_volume_usd": to_float(h.get("sell_volume_cur", 0)),
+            "buy_tx_count": to_int(h.get("buy_tx_count_cur", 0)),
+            "sell_tx_count": to_int(h.get("sell_tx_count_cur", 0)),
+            "netflow_usd": to_float(h.get("netflow_usd", 0)),
+            "is_new": h.get("is_new", False),
+            "is_suspicious": h.get("is_suspicious", False),
+            "created_at": to_int(h.get("created_at", 0)),
+            "tags": h.get("tags", []),
+            "maker_token_tags": h.get("maker_token_tags", []),
+            "labels": labels,
+            "funding_source": {
+                "name": native.get("name"),
+                "from_address": native.get("from_address"),
+                "amount": native.get("amount"),
+                "timestamp": native.get("timestamp", 0),
+                "tx_hash": native.get("tx_hash", ""),
+            },
+            "token_transfer_in": {
+                "name": token_in.get("name"),
+                "tx_hash": token_in.get("tx_hash", ""),
+                "timestamp": token_in.get("timestamp", 0),
+            },
+            "token_transfer_out": {
+                "name": token_out.get("name"),
+                "tx_hash": token_out.get("tx_hash", ""),
+                "timestamp": token_out.get("timestamp", 0),
+            },
+            "twitter_username": h.get("twitter_username"),
+            "twitter_name": h.get("twitter_name"),
+            "exchange": h.get("exchange", ""),
+        }
+        holders.append(entry)
+
+    # Optional tag filter
+    if tag_filter:
+        allowed = {t.strip().lower() for t in tag_filter.split(",")}
+        holders = [h for h in holders if any(l["type"] in allowed for l in h["labels"])]
+
+    # Summary stats
+    top10_pct = round(sum(h["amount_percentage"] for h in holders[:10]) * 100, 2)
+    whale_count = sum(1 for h in holders if h["amount_percentage"] >= 0.01)
+    fresh_count = sum(1 for h in holders if h["is_new"])
+    profit_wallets = sum(1 for h in holders if h["profit"] > 0)
+    total_holders = len(holders)
+
+    return {
+        "holders": holders,
+        "total": total_holders,
+        "summary": {
+            "top10_concentration": round(top10_pct, 2),
+            "whale_count": whale_count,
+            "fresh_wallet_count": fresh_count,
+            "profitable_wallets": profit_wallets,
+            "exchanges_found": len(set(h.get("exchange", "") for h in holders if h.get("exchange"))),
+        },
+    }
+
+
+@app.get("/api/holders/{wallet_addr}/portfolio")
+def get_wallet_portfolio(
+    wallet_addr: str,
+    chain: str = Query("sol", regex="^(sol|bsc|base|eth)$"),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """Get wallet's token portfolio."""
+    raw = gmgn_cli("portfolio", "holdings", "--chain", chain, "--wallet", wallet_addr,
+                    "--limit", str(limit), "--order-by", "usd_value", "--direction", "desc",
+                    "--hide-airdrop", "false", "--hide-closed", "false", "--raw")
+    holdings = raw.get("data", raw)
+    if isinstance(holdings, dict):
+        holdings = holdings.get("list", [])
+    tokens = []
+    for t in holdings:
+        tokens.append({
+            "address": t.get("address", ""),
+            "symbol": t.get("symbol", ""),
+            "name": t.get("name", ""),
+            "logo": t.get("logo", ""),
+            "balance": to_float(t.get("balance", 0)),
+            "usd_value": to_float(t.get("usd_value", 0)),
+            "price": to_float(t.get("price", 0)),
+            "profit": to_float(t.get("total_profit", 0)),
+            "profit_change": to_float(t.get("profit_change")),
+            "buy_volume": to_float(t.get("history_bought_cost", 0)),
+            "sell_volume": to_float(t.get("history_sold_income", 0)),
+            "buy_count": to_int(t.get("buy_tx_count", 0)),
+            "sell_count": to_int(t.get("sell_tx_count", 0)),
+            "last_active": to_int(t.get("last_active_timestamp", 0)),
+        })
+    return {"wallet": wallet_addr, "chain": chain, "tokens": tokens, "total": len(tokens)}
+
+
+@app.get("/api/holders/{wallet_addr}/trades")
+def get_wallet_trades(
+    wallet_addr: str,
+    chain: str = Query("sol", regex="^(sol|bsc|base|eth)$"),
+    token: str = Query("", description="Filter by token contract address"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Get wallet trade activity, optionally filtered by token."""
+    args = ["portfolio", "activity", "--chain", chain, "--wallet", wallet_addr,
+            "--limit", str(limit)]
+    if token:
+        args.extend(["--token", token])
+    args.append("--raw")
+    raw = gmgn_cli(*args)
+    activities = raw.get("data", raw)
+    if isinstance(activities, dict):
+        activities = activities.get("list", [])
+    return {"wallet": wallet_addr, "chain": chain, "activities": activities, "total": len(activities)}
+
+
+@app.get("/api/holders/{wallet_addr}/funding")
+def get_wallet_funding(
+    wallet_addr: str,
+    chain: str = Query("sol", regex="^(sol|bsc|base|eth)$"),
+):
+    """Get wallet funding source info (from holder data + portfolio)."""
+    # funding info comes from portfolio created-tokens or from token transfer history
+    # Primary: check if wallet created tokens
+    created = gmgn_cli("portfolio", "created-tokens", "--chain", chain, "--wallet", wallet_addr, "--raw")
+    created_list = created.get("data", created)
+    if isinstance(created_list, dict):
+        created_list = created_list.get("list", [])
+
+    # Also get wallet stats for overview
+    stats_raw = gmgn_cli("portfolio", "stats", "--chain", chain, "--wallet", wallet_addr, "--period", "30d", "--raw")
+    stats = stats_raw.get("data", stats_raw)
+    if isinstance(stats, list):
+        stats = stats[0] if stats else {}
+
+    return {
+        "wallet": wallet_addr,
+        "chain": chain,
+        "created_tokens": [{
+            "address": t.get("address", ""),
+            "symbol": t.get("symbol", ""),
+            "name": t.get("name", ""),
+            "status": t.get("status", ""),
+            "market_cap": to_float(t.get("market_cap", 0)),
+        } for t in created_list[:20]],
+        "stats": {
+            "total_tokens_traded": to_int(stats.get("token_cur", 0)),
+            "total_bought": to_float(stats.get("total_bought", 0)),
+            "total_sold": to_float(stats.get("total_sold", 0)),
+            "total_profit": to_float(stats.get("total_profit", 0)),
+            "win_rate": to_float(stats.get("win_rate", 0)),
+            "total_tx": to_int(stats.get("txs", 0)),
+            "pnl_7d": to_float(stats.get("pnl_7d", 0)),
+            "pnl_30d": to_float(stats.get("pnl_30d", 0)),
+        },
+    }
+
+
+@app.get("/api/holders/smart-money-list")
+def get_smart_money_list(
+    chain: str = Query("sol", regex="^(sol|bsc|base|eth)$"),
+):
+    """
+    Get known smart money / KOL wallet addresses for cross-referencing.
+    Used by frontend to label wallets that traded this token.
+    """
+    raw = gmgn_cli("track", "smartmoney", "--chain", chain, "--raw")
+    trades = raw.get("data", raw)
+    if isinstance(trades, dict):
+        trades = trades.get("list", [])
+    wallets = {}
+    for t in trades:
+        addr = t.get("maker", "")
+        if not addr:
+            continue
+        mi = t.get("maker_info", {})
+        wallets[addr] = {
+            "address": addr,
+            "tags": mi.get("tags", []),
+            "twitter": mi.get("twitter_username", ""),
+        }
+    return {"wallets": wallets, "total": len(wallets)}
 
 
 if __name__ == "__main__":
